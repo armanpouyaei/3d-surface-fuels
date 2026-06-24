@@ -84,6 +84,15 @@ Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
       FastFuels uniform R² ≈ 0, CV 0. Clean-coarse downscaler 0.852/0.291 = headroom if the
       30 m baseline improves. `figures/pipeline_osbs.png`, `data/processed/pipeline_osbs.npz`.
 
+- [x] **de Conto (2025) architecture head-to-head** (`deconto_headtohead.py`) — faithful
+      compact reproduction of their fully-conv EfficientNetV2 (Fused-MBConv→MBConv+SE,
+      Gaussian-NLL, MC-dropout, 64,242 params) vs our per-pixel quantile GBM, on the **same**
+      fuel-structure target / 68-ch stack / 2×2 blocked folds. **Ours R² 0.628 (cov 85%) vs
+      CNN −0.147 (cov 14%)** — at AOI scale the per-pixel model wins; the CNN is data-starved
+      (their edge needs continental training, which our tiled design supports). We also add
+      calibrated UQ + per-stratum + OOD their WSCI product lacks. `figures/deconto_headtohead.png`.
+      NOTE: CNN runs on **Apple GPU (MPS)** — CPU torch here has no MKL-DNN (~50× slower; 1 s/step).
+
 ## Stage 2: Re-wire the downscaler to the real 30 m product
 - [x] Feed the **Stage-1 30 m product** (not coarsened ALS) into the downscaler as the coarse
       baseline — done in `build_pipeline_osbs.py` (`end_to_end_downscale`: trains on true coarse,

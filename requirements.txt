@@ -27,7 +27,11 @@ h5py                  # GEDI L2B HDF5 (PAVD/PAI/cover)
 # NEON field data is fetched via the direct NEON API (neonutilities choked on a 307);
 # GEDI via CMR + the Earthdata token (~/.edl_token); AlphaEarth via the public Source Coop S3.
 
+# Deep learning (de Conto head-to-head now; Stage-2 UNet later).
+torch                  # CNN head-to-head (deconto_headtohead.py). On Apple Silicon it
+                       # uses the GPU via MPS — the CPU path has no MKL-DNN (~50× slower).
+
 # Later phases:
 # geopandas            # layerset GeoJSON (FastFuels Option D)
-# torch + claymodel    # Stage-2 UNet downscaler (Clay/AlphaEarth embeddings)
+# claymodel            # Stage-2 UNet downscaler (Clay/AlphaEarth embeddings)
 # fastfuels-sdk        # FastFuels v2 API client (head-to-head + ingestion)
