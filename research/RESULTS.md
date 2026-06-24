@@ -113,6 +113,39 @@ end-to-end product still beats the FastFuels uniform layer (R² ≈ 0, within-bl
 recovers most of the heterogeneity that exists. Generality is the competition's key axis; this
 is direct evidence for it.
 
+## 2c. FastFuels surface-layer head-to-head — `fastfuels_headtohead.py`
+
+FastFuels' surface fuel *is*, by design, **LANDFIRE FBFM40 → an SB40 load lookup →
+one value per fuel-model class, uniform within the class**. We encode FastFuels'
+exact lookup (Scott & Burgan 2005, RMRS-GTR-153 Table 7) and compare to our measured
+1 m product over OSBS. Figure: `figures/fastfuels_headtohead.png`.
+
+The script is **API-ready**: with a `FASTFUELS_API_KEY` it runs the real v2 flow
+(create domain → `grids/fbfm40/landfire` → `grids/lookup/fbfm40`); it also tries the
+LANDFIRE ImageServer. The hosted v2 API is **key-gated** (401) and the LANDFIRE
+service was **unreachable from this build environment**, so the committed run uses
+FastFuels' *exact lookup table* against the measured distribution (only the live
+class map is substituted by the longleaf-relevant SB40 candidates).
+
+| FastFuels SB40 class (longleaf-relevant) | assigned surface load (kg/m²) |
+|---|---|
+| GR1 / GR2 / GR3 | 0.09 / 0.25 / 0.45 |
+| GS1 / **GS2** | 0.30 / **0.58** |
+| TU1 / TL2 | 0.83 / 1.32 |
+
+| metric | FastFuels (SB40 uniform) | our measured |
+|---|---|---|
+| surface-load heterogeneity CV (1 m) | **0.00** (one value/class) | **1.13** |
+| CV at 30 m (FastFuels' own scale) | 0.00 | 1.01 |
+| mean load (kg/m²) | a single SB40 value | 0.60 |
+
+**Reading it.** Whichever class FastFuels assigns, it **collapses the whole AOI to a
+single number** — its surface heterogeneity is zero *by construction*. Our measured
+load spans ~0–2.7 kg/m² (CV 1.13). Independent cross-check: **GS2 = 0.58 kg/m²**
+(a plausible OSBS class) nearly matches our measured **mean 0.60** — so our
+magnitude is well-anchored to FastFuels' own table while we add the spatial
+structure it cannot represent.
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only

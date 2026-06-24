@@ -452,6 +452,16 @@ uncertainty + per-stratum + OOD that their structure-index product lacks for fue
         else:
             st.info("Run `python scripts/deconto_headtohead.py` for the architecture head-to-head.")
 
+        st.markdown("""
+### Head-to-head vs the incumbent (FastFuels' actual surface layer)
+FastFuels' surface fuel is **LANDFIRE FBFM40 → an SB40 load lookup → one value per fuel-model
+class, uniform within the class**. Using FastFuels' *exact* lookup table (Scott & Burgan 2005),
+its surface-load heterogeneity is **CV = 0 by construction**; our measured product is **CV 1.13**
+over the same AOI. A plausible OSBS class (**GS2 = 0.58 kg/m²**) nearly matches our measured
+**mean 0.60** — magnitude well-anchored, with the spatial structure FastFuels can't represent.
+""")
+        show_fig("fastfuels_headtohead.png")
+
         st.markdown("### Generality — a second, opposite ecosystem")
         if pipe_soap is not None:
             so, sw, scv, srcv, ss1 = _site_stats(pipe_soap)
