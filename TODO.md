@@ -49,9 +49,16 @@ Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
       ~395 footprints/pass over the ~11 km box but only **3 in the 1 km AOI**. → use GEDI at
       REGIONAL scale (sparse training labels / interpolated covariate over many passes), not per-tile.
       The understory PAVD signal AEF/S1 lack is real; `figures/gedi_osbs.png`.
-- [ ] **▶️ NEXT:** (a) **#1b** add litter/CWD for *total* surface load + calibrate the 3DEP proxy
-      to field; (b) **larger multi-ecosystem region** (where GEDI becomes usable + generality is
-      testable); (c) de-Conto-architecture-on-fuel head-to-head; (d) re-wire Stage-2 downscaler to the 30 m output.
+- [x] **Proxy validation (CRITICAL)** — `validate_proxy_field.py`: the 3DEP near-ground proxy
+      does **NOT** track field herb load (Pearson 0.13 ns, Spearman 0.02). It measures woody/shrub
+      understory, not herbaceous. So Stage-1's R² 0.66/0.72 predicts the *proxy*, not validated herb
+      fuel. Predictors are fine (AEF→field herb Spearman 0.51); the **proxy target is the problem**.
+      `figures/proxy_vs_field.png`.
+- [ ] **▶️ PIVOT (pending user nudge): field-calibrated targets, not the 3DEP proxy.**
+      (a) **Multi-ecosystem generality** = AEF → NEON field herb across ~3-5 NEON sites (all 81 have
+      herb clips) — the validated path + the generality axis; (b) treat the 3DEP near-ground proxy as
+      a separate *woody-understory* component (legit, just not herb); (c) Stage-2 rewire; (d) de-Conto
+      head-to-head. NEON litter (DP1.10033) is a FLUX, not standing load — can't naively sum for "total".
 - [ ] **⚠️ DO FIRST — define + pre-validate the 3DEP→surface-fuel-load equation** against FIA/NEON
       (1 m fuel proxy: fuelbed depth + sub-canopy return density → kg/m²). *Everything downstream
       depends on this; if it's weak (~R² 0.3–0.4) re-scope the variable.*
