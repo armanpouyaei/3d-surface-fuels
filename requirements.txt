@@ -20,9 +20,14 @@ affine==2.4.0         # target transform for reproject
 planetary-computer==1.0.0  # sign Planetary Computer asset URLs (no account needed)
 pystac-client==0.8.3  # STAC search for Sentinel-1 RTC
 
-# Later phases (Week 3+):
-# scikit-learn         # quantile random forest calibration / UQ
+# Stage-1 modeling + analysis (global30/downscale/field/GEDI + figures).
+scikit-learn==1.6.1   # quantile GBM, Ridge, PCA, CV
+matplotlib            # diagnostic figures (figures/, gitignored)
+h5py                  # GEDI L2B HDF5 (PAVD/PAI/cover)
+# NEON field data is fetched via the direct NEON API (neonutilities choked on a 307);
+# GEDI via CMR + the Earthdata token (~/.edl_token); AlphaEarth via the public Source Coop S3.
+
+# Later phases:
 # geopandas            # layerset GeoJSON (FastFuels Option D)
-# neonutilities        # NEON ALS + clip-plot truth download
-# earthaccess          # GEDI download
+# torch + claymodel    # Stage-2 UNet downscaler (Clay/AlphaEarth embeddings)
 # fastfuels-sdk        # FastFuels v2 API client (head-to-head + ingestion)
