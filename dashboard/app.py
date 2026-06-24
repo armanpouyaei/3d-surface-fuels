@@ -635,15 +635,21 @@ elif source.startswith("🌍"):
                          help="Side of each canonical grid tile. Defines the fixed global tiling + cache.")
         ZMIN = 13
 
-    # state from the previous run of this (preset, size) map
-    mapkey = "aoi_map_%d_%d" % (list(PRESETS).index(preset), int(size))
+    # state from the previous run of this preset's map (size kept out of the key so
+    # changing tile size doesn't reset the view)
+    mapkey = "aoi_map_%d" % list(PRESETS).index(preset)
     prev = st.session_state.get(mapkey) or {}
     pc, bounds, zoom = prev.get("last_clicked"), prev.get("bounds"), prev.get("zoom")
     # selected tile = the click snapped to the canonical L-grid (else the preset's tile)
     sel = portable.snap_to_grid(pc["lat"], pc["lng"], float(size)) if pc \
         else portable.snap_to_grid(clat, clon, float(size))
 
-    fmap = folium.Map(location=[sel["lat"], sel["lon"]], zoom_start=14, tiles=None, control_scale=True)
+    # preserve the user's pan/zoom across reruns (feed back the last reported view) so
+    # zooming/panning doesn't snap back to the default; a NEW preset resets it (new key).
+    pcenter = prev.get("center")
+    loc = [pcenter["lat"], pcenter["lng"]] if pcenter else [sel["lat"], sel["lon"]]
+    zoom_start = int(zoom) if zoom else 14
+    fmap = folium.Map(location=loc, zoom_start=zoom_start, tiles=None, control_scale=True)
     folium.TileLayer(ESRI_TILES, attr="Esri World Imagery", name="Satellite").add_to(fmap)
     cells = portable.viewport_grid(bounds, float(size)) if (bounds and (zoom or 0) >= ZMIN) else None
     if cells is not None:
@@ -658,7 +664,7 @@ elif source.startswith("🌍"):
                      tooltip=f"selected tile {sel['i']},{sel['j']} · {size:.0f} m").add_to(fmap)
     folium.CircleMarker([sel["lat"], sel["lon"]], radius=4, color="#ffec3d", fill=True, fill_opacity=1).add_to(fmap)
     map_state = st_folium(fmap, height=440, use_container_width=True,
-                          returned_objects=["last_clicked", "bounds", "zoom"], key=mapkey)
+                          returned_objects=["last_clicked", "bounds", "zoom", "center"], key=mapkey)
     nc = (map_state or {}).get("last_clicked")
     if nc:                                            # newest click this run -> re-snap
         sel = portable.snap_to_grid(nc["lat"], nc["lng"], float(size))
