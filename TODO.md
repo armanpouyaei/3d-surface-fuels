@@ -69,8 +69,25 @@ Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
 - [ ] **Output**: 30 m fuel median+quantiles per AOI → `data/processed/global30_*.tif`; script `scripts/build_global30.py`.
 - [ ] *(Deferred from POC per critique: Clay self-hosting; from-scratch EfficientNetV2 baseline — keep as later axes.)*
 
+## HEADLINE (user steer 2026-06-24): MEASURED 3D STRUCTURE / BULK-DENSITY
+> Multi-ecosystem test confirmed herbaceous *load* from spaceborne is genuinely hard
+> (transfer ρ 0.25, unstable — literature ceiling). Fuel *structure* is robust. So the
+> deliverable is the **measured 3D fuel-structure/bulk-density** product that beats
+> FastFuels' uniform surface layer; herb load = honest uncertainty-flagged add-on.
+
+- [x] **END-TO-END pipeline over OSBS** (`build_pipeline_osbs.py`) — Stage-1 (spaceborne
+      AEF+S1+terrain → 30 m structure, blocked CV **R² 0.767**, open 0.79 / under-canopy 0.48)
+      → Stage-2 (downscale the *predicted* 30 m → 10 m with AlphaEarth 10 m + terrain) →
+      validated vs **measured 3DEP** truth, head-to-head vs FastFuels uniform.
+      RESULT: end-to-end **R² 0.664, within-block R² 0.274** (the sub-30 m detail FastFuels
+      structurally lacks — its within-block R² = 0); heterogeneity CV 0.73 vs truth 0.89;
+      FastFuels uniform R² ≈ 0, CV 0. Clean-coarse downscaler 0.852/0.291 = headroom if the
+      30 m baseline improves. `figures/pipeline_osbs.png`, `data/processed/pipeline_osbs.npz`.
+
 ## Stage 2: Re-wire the downscaler to the real 30 m product
-- [ ] Feed the **Stage-1 30 m product** (not coarsened ALS) into `downscale.downscale_cv` as the coarse baseline
+- [x] Feed the **Stage-1 30 m product** (not coarsened ALS) into the downscaler as the coarse
+      baseline — done in `build_pipeline_osbs.py` (`end_to_end_downscale`: trains on true coarse,
+      deploys on predicted coarse, mass-conserves to the deployed 30 m). Eglin POC superseded.
 - [ ] Add globally-available 10 m covariates: **AlphaEarth Foundations** (GEE Satellite Embedding) and/or **Clay** ViT embeddings, + Sentinel-2, terrain
 - [ ] Re-validate over Eglin + ≥1 other ecosystem (held-out); report within-block R², CV, mass-conservation
 - [ ] Dashboard: add **"30 m → 1 m downscaler"** mode (Truth | Stage-1 30 m | Downscaled, synced; metrics) — *not yet built*
