@@ -164,6 +164,28 @@ the in-scope **surface** layer is the one FastFuels renders flat and we make 3D.
 (The `grids/surface` LANDFIRE-FBFM40 step failed server-side at run time, so the
 combined surface+tree export wasn't available; the tree grid is the canopy shown.)
 
+## 2d. Global "generate anywhere" — on-demand inference (`portable.py`, dashboard tab)
+
+A **portable Stage-1 model** (`scripts/train_portable.py` → `stage1_portable.joblib`)
+trained once on US sites (OSBS + SOAP, 30k pooled 10 m samples) using **only global,
+free predictors** (AlphaEarth + Sentinel-1 — *no LiDAR at inference*). The dashboard's
+**🌍 Generate anywhere** tab takes any lat/lon → fetches AEF+S1 for that AOI → predicts
+30 m→1 m structure + 3D voxels, with **conformal intervals**, an **OOD flag**, and a
+**disk cache**. Verified live: OSBS-2018 **1 % OOD** (in-distribution), OSBS-2022 3 %,
+Amazon **100 % OOD** (correctly flagged).
+
+- **Design:** on-demand per-AOI (no world-wide pre-grid) + cache. **Memory-safe by
+  construction** — inference runs at 10 m (a 1500 m AOI is 150×150×66 floats ≈ 6 MB),
+  hard AOI cap 2000 m, 1 m export voxel-budgeted; the UI shows the footprint pre-run.
+- **OOD is computed on AlphaEarth bands only** (Sentinel-1 availability is flaky
+  globally; including it spuriously inflated the distance). It reflects novelty in
+  **ecosystem AND AEF year** and is conservative by design.
+- **Honest generality limit:** leave-one-site-out transfer is weak (R² −0.18 / −0.45)
+  with only 2 opposite training ecosystems — so most non-(SE-savanna/Sierra-conifer)
+  locations flag OOD. The flag is the safeguard; **adding 3DEP training sites is the
+  path to real global generality.** This tab is a *capability* demo, validated only
+  where we have US truth.
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only
