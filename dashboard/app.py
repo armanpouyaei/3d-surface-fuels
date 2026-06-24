@@ -590,23 +590,29 @@ elif source.startswith("🌍"):
         st.warning("Portable model not built yet — run `python scripts/train_portable.py`.")
         st.stop()
 
+    # (lat, lon, default AEF year). The two US sites default to their TRAINING vintage
+    # (OSBS-2018, SOAP-2022) — AlphaEarth drifts year-to-year, so a matching year is
+    # in-distribution; other years/places flag OOD (honest, conservative).
     PRESETS = {
-        "OSBS savanna (FL, US)": (29.69, -81.99), "SOAP conifer (CA, US)": (37.03, -119.26),
-        "Yosemite (CA, US)": (37.75, -119.59), "Konza prairie (KS, US)": (39.10, -96.56),
-        "Amazon rainforest (BR)": (-3.10, -60.02), "Custom…": None,
+        "OSBS savanna (FL, US) — training site": (29.69, -81.99, 2018),
+        "SOAP conifer (CA, US) — training site": (37.03, -119.26, 2022),
+        "Yosemite (CA, US)": (37.75, -119.59, 2022), "Konza prairie (KS, US)": (39.10, -96.56, 2022),
+        "Amazon rainforest (BR)": (-3.10, -60.02, 2022), "Custom…": None,
     }
     with st.sidebar:
         st.header("Location")
         preset = st.selectbox("Preset", list(PRESETS), index=0)
         if PRESETS[preset] is not None:
-            lat, lon = PRESETS[preset]
+            lat, lon, pyear = PRESETS[preset]
             st.write(f"📍 {lat:.4f}, {lon:.4f}")
         else:
             lat = st.number_input("Latitude", -60.0, 70.0, 29.69, format="%.4f")
             lon = st.number_input("Longitude", -180.0, 180.0, -81.99, format="%.4f")
+            pyear = 2022
         size = st.slider("AOI size (m)", 400, 1500, 1200, step=100,
                          help="Capped at 1500 m so generation stays within memory (no OOM).")
-        year = st.select_slider("AlphaEarth year", options=list(range(2017, 2025)), value=2022)
+        year = st.select_slider("AlphaEarth year", options=list(range(2017, 2025)), value=pyear,
+                                help="Training vintages: OSBS 2018, SOAP 2022. Off-vintage years read as OOD.")
         est = portable.aoi_memory_estimate(float(size))
         st.caption(f"🧠 {est['n10']}×{est['n10']} @10 m · ~{est['predict_mb']:.0f} MB to generate · "
                    f"1 m export ~{est['export_1m_mb']:.0f} MB")
@@ -626,13 +632,14 @@ elif source.startswith("🌍"):
     pred, ood = out["pred10"], out["ood"]
     thr, frac_ood = float(out["ood_thresh"]), float(out["frac_ood"])
     if frac_ood > 0.5:
-        st.error(f"⚠️ {frac_ood*100:.0f}% of this AOI is **out-of-distribution** (unlike the US training "
-                 "ecosystems — SE savanna + Sierra conifer). Treat as exploratory extrapolation, *not* a "
-                 "validated product. This is the honest limit of a US-trained model applied globally.")
+        st.error(f"⚠️ {frac_ood*100:.0f}% of this AOI is **out-of-distribution** — unlike the model's training "
+                 "data (OSBS-2018 savanna + SOAP-2022 conifer). OOD reflects novelty in **ecosystem AND "
+                 "AlphaEarth year** (embeddings drift yearly). Treat as exploratory extrapolation, *not* a "
+                 "validated product — the flag is **conservative by design** (it warns rather than silently misleads).")
     elif frac_ood > 0.15:
-        st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution — interpret with care.")
+        st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution (ecosystem and/or AEF-year novelty) — interpret with care.")
     else:
-        st.success("In-distribution: this AOI resembles the training ecosystems.")
+        st.success("In-distribution: this AOI + year resembles the training data — most confidence here.")
     st.caption(f"{'⚡ cached' if out.get('cached') else '🛰️ freshly generated'} · AlphaEarth {out['year']} · "
                f"{'with' if out.get('has_s1') else 'no'} Sentinel-1 · EPSG:{int(out['epsg'])} · "
                "*predicted* surface structure — no local truth here, so read the uncertainty + OOD maps.")

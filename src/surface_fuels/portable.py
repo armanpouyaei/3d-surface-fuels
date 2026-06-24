@@ -64,11 +64,15 @@ def train(X: np.ndarray, y: np.ndarray, sites: Optional[list] = None,
     models = g30._fit_quantiles(X[~cal], y[~cal], quantiles)
     delta = g30._cqr_delta(models, X[cal], y[cal], quantiles[0], quantiles[-1])
     mu, sd = X.mean(0), X.std(0) + 1e-9
-    centroid = ((X - mu) / sd).mean(0)
-    ood = np.sqrt((((X - mu) / sd - centroid) ** 2).sum(1))
+    # OOD on the 64 AlphaEarth bands ONLY — Sentinel-1 availability is flaky globally,
+    # and zeroed S1 features would otherwise spuriously inflate the OOD distance.
+    n_aef = 64
+    Zaef = ((X - mu) / sd)[:, :n_aef]
+    centroid = Zaef.mean(0)
+    ood = np.sqrt(((Zaef - centroid) ** 2).sum(1))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     joblib.dump({"models": models, "quantiles": quantiles, "delta": float(delta),
-                 "mu": mu, "sd": sd, "centroid": centroid,
+                 "mu": mu, "sd": sd, "centroid": centroid, "n_aef": n_aef,
                  "ood_thresh": float(np.percentile(ood, 95)), "feats": FEATS,
                  "sites": sites or [], "n_train": int(len(y))}, out_path)
     return out_path
@@ -141,8 +145,9 @@ def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
     med = m["models"][qs[len(qs) // 2]].predict(X)
     lo = m["models"][qs[0]].predict(X) - m["delta"]
     hi = m["models"][qs[-1]].predict(X) + m["delta"]
-    Z = (X - m["mu"]) / m["sd"]
-    ood = np.sqrt(((Z - m["centroid"]) ** 2).sum(1))
+    n_aef = m.get("n_aef", 64)
+    Zaef = ((X - m["mu"]) / m["sd"])[:, :n_aef]      # OOD on AlphaEarth bands only (robust)
+    ood = np.sqrt(((Zaef - m["centroid"]) ** 2).sum(1))
     pred10 = np.clip(med, 0, None).reshape(ny, nx)
     out = {
         "pred10": pred10,
