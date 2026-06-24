@@ -22,7 +22,7 @@ from plotly.subplots import make_subplots
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from surface_fuels import FuelVoxelGrid, fusion, metrics  # noqa: E402
+from surface_fuels import FuelVoxelGrid, fusion, metrics, downscale as ds  # noqa: E402
 from surface_fuels.synthetic import make_demo_scenario, make_fusion_scenario  # noqa: E402
 
 st.set_page_config(page_title="3D Surface Fuels", layout="wide")
@@ -52,6 +52,16 @@ def load_fusion(nx, seed):
 @st.cache_data(show_spinner=False)
 def load_real_sar():
     p = os.path.join(PROC, "eglin_sar.npz")
+    if not os.path.exists(p):
+        return None
+    d = np.load(p, allow_pickle=True)
+    return {k: d[k] for k in d.files}
+
+
+@st.cache_data(show_spinner=False)
+def load_pipeline():
+    """End-to-end OSBS product (scripts/build_pipeline_osbs.py)."""
+    p = os.path.join(PROC, "pipeline_osbs.npz")
     if not os.path.exists(p):
         return None
     d = np.load(p, allow_pickle=True)
@@ -236,14 +246,70 @@ st.caption(
 
 with st.sidebar:
     st.header("Data source")
-    source = st.radio("", ["Synthetic longleaf demo", "SAR + LiDAR fusion (synthetic)",
-                           "Real — Eglin 3DEP LiDAR"], index=0)
+    source = st.radio("", ["End-to-end — OSBS (spaceborne→1 m)", "Synthetic longleaf demo",
+                           "SAR + LiDAR fusion (synthetic)", "Real — Eglin 3DEP LiDAR"], index=0)
     st.divider()
     threshold = st.slider("Min bulk density shown (kg/m³)", 0.0, 1.0, 0.02, step=0.02)
     opacity = st.slider("Volume opacity", 0.05, 0.6, 0.2, step=0.05)
 
+# ===================== END-TO-END OSBS MODE =====================
+if source.startswith("End-to-end"):
+    pipe = load_pipeline()
+    if pipe is None:
+        st.warning("No end-to-end product found. Run `python scripts/build_pipeline_osbs.py` "
+                   "(needs data/raw/osbs_3dep_2018.laz).")
+        st.stop()
+    truth10, uniform = pipe["truth10"], pipe["uniform"]
+    stage1_up, e2e, clean = pipe["stage1_up"], pipe["e2e"], pipe["clean"]
+    pred30, truth30 = pipe["pred30"], pipe["truth30"]
+    factor = int(pipe["factor"]); res10 = float(pipe["res10"])
+
+    def _stats(p):
+        bd = lambda a: a - ds.upsample(ds.block_coarsen(a, factor), factor, a.shape)
+        return (metrics.r2(p, truth10), metrics.r2(bd(p), bd(truth10)),
+                float(p.std() / (p.mean() + 1e-9)))
+
+    st.subheader("End-to-end: spaceborne → 30 m → fine measured-structure (OSBS)")
+    st.markdown(
+        "**Stage 1** — AlphaEarth + Sentinel-1 + terrain → 30 m fuel structure (spatially-blocked CV). "
+        f"**Stage 2** — downscales the *predicted* 30 m to {res10:.0f} m with AlphaEarth's {res10:.0f} m "
+        "bands + terrain (mass-conserving). Validated against the **measured 3DEP** structure, head-to-head "
+        "vs the FastFuels-style uniform layer.")
+
+    vmax = float(np.percentile(truth10, 98))
+    st.plotly_chart(synced_heatmaps([
+        {"title": "Measured 3DEP (truth)", "z": truth10, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
+        {"title": "FastFuels uniform", "z": uniform, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
+        {"title": "Stage-1 30 m (spaceborne)", "z": stage1_up, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
+        {"title": f"End-to-end {res10:.0f} m (ours)", "z": e2e, "cmin": 0, "cmax": vmax,
+         "colorscale": COLORSCALE, "cbar": True, "cbar_title": "kg/m² proxy"},
+    ]), use_container_width=True)
+    st.caption("FastFuels paints one value per 30 m class (flat — within-block R² = 0 by construction). "
+               "Stage-1 recovers the coarse level; our downscaler adds the sub-30 m detail. Zoom any panel — all move together.")
+
+    re2e, we2e, cve2e = _stats(e2e)
+    runi, wuni, _ = _stats(uniform)
+    st.subheader("Validation — vs measured 3DEP truth")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("End-to-end R²", f"{re2e:.2f}", f"{re2e - runi:+.2f} vs FastFuels")
+    c2.metric("Within-block R² (sub-30 m)", f"{we2e:.2f}", f"FastFuels {wuni:.2f}", delta_color="off")
+    c3.metric("Heterogeneity (CV)", f"{cve2e:.2f}", f"truth {truth10.std()/truth10.mean():.2f}")
+    c4.metric("Stage-1 30 m R²", f"{metrics.r2(pred30, truth30):.2f}", "spaceborne, blocked CV", delta_color="off")
+
+    names = ["FastFuels uniform", "Stage-1 30 m", "Downscaler (clean)", "End-to-end"]
+    arrs = [uniform, stage1_up, clean, e2e]
+    bar = go.Figure()
+    bar.add_bar(name="overall R²", x=names, y=[_stats(a)[0] for a in arrs])
+    bar.add_bar(name="within-block R² (sub-30 m)", x=names, y=[_stats(a)[1] for a in arrs])
+    bar.update_layout(barmode="group", height=340, yaxis_title="R²",
+                      margin=dict(l=0, r=0, t=10, b=0), legend=dict(orientation="h", y=1.12))
+    st.plotly_chart(bar, use_container_width=True)
+    st.caption("The FastFuels gap is the **within-block** bar: a uniform layer is flat inside every 30 m cell "
+               "(within-block R² ≈ 0). The clean-coarse downscaler (perfect 30 m input) shows the headroom as the "
+               "Stage-1 baseline improves. Honest error budget: end-to-end = Stage-1 30 m error + Stage-2 detail.")
+
 # ===================== SYNTHETIC MODE =====================
-if source.startswith("Synthetic"):
+elif source.startswith("Synthetic"):
     with st.sidebar:
         st.header("Synthetic scene")
         nx = st.slider("Domain size (m)", 40, 160, 100, step=20)
