@@ -64,7 +64,7 @@ not a generative guess.
 | `scripts/run_downscale_demo.py` | synthetic 30 m→1 m downscaler blocked-CV table |
 | `scripts/build_downscale_eglin.py` | real 30 m→1 m downscale over Eglin → eglin_downscale.npz |
 | `scripts/run_global30_demo.py` | Stage-1 regressor POC (synthetic): blocked CV + per-stratum + conformal + ablation |
-| `scripts/build_global30_eglin.py` | real Stage-1 over Eglin tile: AEF+S1+terrain → 3DEP 30 m fuel proxy, blocked CV |
+| `scripts/build_global30.py` | real Stage-1 over Eglin tile: AEF+S1+terrain → 3DEP 30 m fuel proxy, blocked CV |
 | `data/{raw,interim,processed}/` | Data (gitignored) |
 
 ## Commands
@@ -156,14 +156,18 @@ AlphaEarth/Clay embeddings + a UNet.
   physical-only 0.27, full 0.56.
 - ✅ **Stage-1 real build started:** **AlphaEarth fetcher works FREE** (Source Coop mirror,
   no GEE — `embeddings.py`, verified 64-band over Eglin); Earthdata token unlocks GEDI; full
-  real Stage-1 pipeline runs (`build_global30_eglin.py`: AEF+S1+terrain → 3DEP 30 m fuel proxy,
+  real Stage-1 pipeline runs (`build_global30.py`: AEF+S1+terrain → 3DEP 30 m fuel proxy,
   blocked CV). **BUT the single 2007 Eglin tile gives weak R² (~0.14; AEF-only negative)** —
   diagnosed: 2024 AEF vs 2007 LiDAR **17-yr temporal gap** + tiny homogeneous tile. The method
   is sound (synthetic Stage-1 R² 0.56, embed-only 0.42); the real demo needs **vintage-matched,
   larger, field-validated data**.
-- ▶️ **Next:** (1) **NEON OSBS** (recent AOP LiDAR ~2021-2023 vintage-matched to AEF + FIA/NEON
-  field truth + longleaf) for a real, validated Stage-1 run; (2) pre-validate the 3DEP→fuel
-  equation vs FIA/NEON; (3) add Sentinel-2 + GEDI predictors; (4) re-wire downscaler to the 30 m
-  output; (5) UNet upgrade. Embedding path = AlphaEarth via free S3 mirror.
+- ✅ **Vintage-matched run (OSBS, 2018 3DEP + AEF 2018):** R² **0.14 → 0.61** (temporal gap was
+  the issue), coverage 0.90. **Honest ablation: AlphaEarth ≈ no gain over Sentinel-1 + terrain**
+  (full 0.607 vs physical 0.604; AEF-only 0.15) — AEF overlaps S1 and its structure signal is
+  GEDI/canopy-top, so limited understory info. The ablation is the credibility tool; don't over-rely on AEF.
+- ▶️ **Next:** (1) **NEON OSBS field plots** (`neonutilities`: herb/litter/CWD) to calibrate/validate
+  a REAL fuel target (replace the 3DEP proxy — biggest risk); (2) add **GEDI L2B PAVD** understory
+  features (token works) — the signal AEF/S1 lack; (3) larger multi-ecosystem region; (4) re-wire
+  downscaler to the 30 m output; (5) UNet. Embedding path = AlphaEarth via free S3 mirror.
 
 When adding real data, mirror the `FuelVoxelGrid` interface so dashboard/metrics work unchanged.

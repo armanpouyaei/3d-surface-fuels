@@ -12,6 +12,7 @@ scaling to an ecoregion + adding Sentinel-2/GEDI + FIA/NEON validation are next.
 Usage:  python scripts/build_global30_eglin.py
 """
 
+import argparse
 import os
 import sys
 
@@ -22,8 +23,8 @@ import numpy as np  # noqa: E402
 from surface_fuels import FuelVoxelGrid, GeoRef, lidar, global30 as g30, embeddings as emb, sar  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-LAZ = os.path.join(ROOT, "data", "raw", "eglin_3dep_000051.laz")
 RES = 30.0
+TARGET_EPSG = 32616  # set per-run in main()
 
 
 def build_target_grid(pc):
@@ -33,7 +34,7 @@ def build_target_grid(pc):
     ny = int((pc.y.max() - y0) // RES)
     grid = FuelVoxelGrid(bulk_density=np.zeros((1, ny, nx), np.float32),
                          dz=RES, dy=RES, dx=RES,
-                         georef=GeoRef("EPSG:32616", x0, y0, RES))
+                         georef=GeoRef(f"EPSG:{TARGET_EPSG}", x0, y0, RES))
     # height above ground
     dtm, dres, ng = lidar._ground_dtm(pc, x0, y0, max(nx, ny) * RES, res=5.0)
     gi = np.clip(((pc.x - x0) / dres).astype(int), 0, ng - 1)
@@ -60,31 +61,42 @@ def build_target_grid(pc):
 
 
 def main():
-    if not os.path.exists(LAZ):
-        sys.exit("Missing LAZ — run scripts/download_eglin_lidar.py")
-    print("Loading 3DEP point cloud...")
-    pc = lidar.load_points(LAZ, src_epsg=2238, target_epsg=32616, z_unit="ft_us")
+    global TARGET_EPSG
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--laz", default=os.path.join(ROOT, "data", "raw", "eglin_3dep_000051.laz"))
+    ap.add_argument("--src-epsg", type=int, default=2238, help="LAZ horizontal CRS (Eglin 2238, OSBS 6438)")
+    ap.add_argument("--target-epsg", type=int, default=32616, help="UTM target (Eglin 32616, OSBS 32617)")
+    ap.add_argument("--aef-year", type=int, default=2024, help="AlphaEarth year (match the LiDAR vintage)")
+    ap.add_argument("--site", default="eglin")
+    args = ap.parse_args()
+    TARGET_EPSG = args.target_epsg
+
+    if not os.path.exists(args.laz):
+        sys.exit(f"Missing LAZ: {args.laz}")
+    print(f"[{args.site}] Loading 3DEP point cloud (EPSG:{args.src_epsg} -> UTM {args.target_epsg})...")
+    pc = lidar.load_points(args.laz, src_epsg=args.src_epsg, target_epsg=args.target_epsg, z_unit="ft_us")
     grid, target, canopy, elev, slope, block_id = build_target_grid(pc)
     print(f"30 m grid {target.shape} over {grid.nx*RES/1000:.1f}x{grid.ny*RES/1000:.1f} km; "
           f"target mean {target.mean():.2f} kg/m²; under-canopy {(canopy>=0.3).mean()*100:.0f}%")
 
-    print("Fetching AlphaEarth embeddings (free, Source Coop mirror)...")
-    aef = emb.aef_for_grid(grid, year=2024)
+    print(f"Fetching AlphaEarth embeddings (year {args.aef_year}, free Source Coop mirror)...")
+    aef = emb.aef_for_grid(grid, year=args.aef_year)
     print("Fetching Sentinel-1 seasonal (Planetary Computer)...")
     s1 = sar.sar_features_for_grid(grid)
 
-    preds = {"canopy": canopy, "elev": elev, "slope": slope}
+    # Predictors must be SPACEBORNE-only (the product is applied where there is no airborne
+    # LiDAR). LiDAR-derived canopy would leak the target (same sensor) — keep it ONLY for
+    # per-stratum metrics, not as a feature. Terrain (static ground elevation) is fine — it is
+    # independent of the fuel target and globally available (Copernicus DEM equivalent).
+    preds = {"elev": elev, "slope": slope}
     if s1 is not None:
         preds["s1_vhvv"], preds["s1_rvi"] = s1["vh_vv"], s1["rvi"]
     aef_keys = []
     if aef is not None:
-        from sklearn.decomposition import PCA
-        flat = np.nan_to_num(aef.reshape(64, -1).T)
-        k = 16
-        pcs = PCA(n_components=k, random_state=0).fit_transform(flat).T.reshape(k, grid.ny, grid.nx)
-        for i in range(k):
-            preds[f"aef{i:02d}"] = pcs[i].astype(np.float32); aef_keys.append(f"aef{i:02d}")
-        print(f"  AlphaEarth -> top {k} PCA components")
+        deq = np.nan_to_num(aef)  # all 64 dequantized bands (fairest test of AEF)
+        for i in range(64):
+            preds[f"aef{i:02d}"] = deq[i].astype(np.float32); aef_keys.append(f"aef{i:02d}")
+        print("  AlphaEarth -> all 64 bands")
 
     def run(p, label):
         out = g30.blocked_cv(target, p, block_id, conformal=True)
@@ -92,13 +104,13 @@ def main():
         print(f"  {label:<34} R2 {rep['r2']:>6}  open {rep['r2_open']:>6}  canopy {rep['r2_under_canopy']:>6}  cov {rep['interval_coverage']:>5}")
         return rep
 
-    print("\nSpatially-blocked CV (real 30 m Eglin, vs 3DEP fuel proxy):")
+    print(f"\nSpatially-blocked CV (real 30 m {args.site}, vs 3DEP fuel proxy):")
     run(preds, "full (AEF + S1 + terrain + canopy)")
     run({k: v for k, v in preds.items() if k not in aef_keys}, "physical only (S1 + terrain + canopy)")
     if aef_keys:
         run({k: preds[k] for k in aef_keys}, "AlphaEarth only")
 
-    np.savez_compressed(os.path.join(ROOT, "data", "processed", "global30_eglin.npz"),
+    np.savez_compressed(os.path.join(ROOT, "data", "processed", f"global30_{args.site}.npz"),
                         target=target, canopy=canopy, aef_available=aef is not None)
     print("\nNote: target is a 3DEP near-ground return-density PROXY (pending FIA/NEON calibration). "
           "Single-tile POC; scale to ecoregion + add S2/GEDI next.")

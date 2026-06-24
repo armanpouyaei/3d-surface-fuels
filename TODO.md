@@ -27,12 +27,20 @@ Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
       0.27, full 0.56; under-canopy honestly lower; `scripts/run_global30_demo.py`.
 - [x] **AlphaEarth fetcher — FREE, no GEE** (`embeddings.py`): Source Coop mirror, .vrt-indexed
       COGs, dequantized → (64,ny,nx) for any AOI grid. Verified over Eglin.
-- [x] **Real Stage-1 pipeline run** (`build_global30_eglin.py`: AEF+S1+terrain → 3DEP 30 m fuel
+- [x] **Real Stage-1 pipeline run** (`build_global30.py`: AEF+S1+terrain → 3DEP 30 m fuel
       proxy, blocked CV). ⚠️ **Weak (R² ~0.14, AEF-only negative)** — 2024 AEF vs **2007** LiDAR
       (17-yr temporal gap) + tiny homogeneous tile. Pipeline works; the *data vintage* is the issue.
-- [ ] **▶️ NEXT: vintage-matched, larger, field-validated run — NEON OSBS** (recent AOP LiDAR
-      ~2021-2023 to match AEF year + FIA/NEON field truth + longleaf). This is what makes the real
-      result credible.
+- [x] **Vintage-matched real run — OSBS, 2018 3DEP + AlphaEarth 2018** (`build_global30.py --site osbs`):
+      **R² 0.14 → 0.61** (confirms the temporal gap was the issue), interval coverage 0.90. **Honest
+      ablation finding: AlphaEarth adds ~nothing over Sentinel-1 + terrain** (full 0.607 vs physical
+      0.604; small under-canopy bump 0.06 vs −0.05; AEF-only 0.15). AEF overlaps S1 and its structure
+      signal is GEDI/canopy-top → limited understory info. Don't over-rely on AEF; the ablation is the
+      credibility tool.
+- [ ] **▶️ NEXT — make the target REAL (not a proxy) + add the missing signal:**
+      (a) **NEON OSBS field plots** (herb clip DP1.10023 / litter DP1.10033 / CWD DP1.10014 via
+      `neonutilities`) → calibrate/validate the 30 m fuel target (the biggest-risk step);
+      (b) add **GEDI L2B PAVD** understory features (token works) — the signal AEF/S1 lack;
+      (c) **larger, multi-ecosystem region** (more tiles) so generality is testable.
 - [ ] **⚠️ DO FIRST — define + pre-validate the 3DEP→surface-fuel-load equation** against FIA/NEON
       (1 m fuel proxy: fuelbed depth + sub-canopy return density → kg/m²). *Everything downstream
       depends on this; if it's weak (~R² 0.3–0.4) re-scope the variable.*
