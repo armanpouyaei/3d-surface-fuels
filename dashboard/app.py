@@ -71,9 +71,9 @@ def show_fig(name, caption=None):
 
 
 @st.cache_data(show_spinner=False)
-def load_pipeline():
-    """End-to-end OSBS product (scripts/build_pipeline_osbs.py)."""
-    p = os.path.join(PROC, "pipeline_osbs.npz")
+def load_pipeline(site="osbs"):
+    """End-to-end product for a site (scripts/build_pipeline_osbs.py --site)."""
+    p = os.path.join(PROC, f"pipeline_{site}.npz")
     if not os.path.exists(p):
         return None
     d = np.load(p, allow_pickle=True)
@@ -300,11 +300,20 @@ if source.startswith("End-to-end"):
     factor = int(pipe["factor"]); res10 = float(pipe["res10"])
     deliv = load_deliverable()
     dc = load_deconto()
+    pipe_soap = load_pipeline("soap")
 
     def _stats(p):
         bd = lambda a: a - ds.upsample(ds.block_coarsen(a, factor), factor, a.shape)
         return (metrics.r2(p, truth10), metrics.r2(bd(p), bd(truth10)),
                 float(p.std() / (p.mean() + 1e-9)))
+
+    def _site_stats(pp):
+        """End-to-end (overall, within-block, CV) + Stage-1 R² for any site's pipeline dict."""
+        f = int(pp["factor"]); t = pp["truth10"]
+        bd = lambda a: a - ds.upsample(ds.block_coarsen(a, f), f, a.shape)
+        return (metrics.r2(pp["e2e"], t), metrics.r2(bd(pp["e2e"]), bd(t)),
+                float(t.std() / t.mean()), float(pp["e2e"].std() / pp["e2e"].mean()),
+                metrics.r2(pp["pred30"], pp["truth30"]))
     re2e, we2e, cve2e = _stats(e2e)
     runi, wuni, _ = _stats(uniform)
     truth_cv = float(truth10.std() / truth10.mean())
@@ -442,6 +451,27 @@ uncertainty + per-stratum + OOD that their structure-index product lacks for fue
             show_fig("deconto_headtohead.png")
         else:
             st.info("Run `python scripts/deconto_headtohead.py` for the architecture head-to-head.")
+
+        st.markdown("### Generality — a second, opposite ecosystem")
+        if pipe_soap is not None:
+            so, sw, scv, srcv, ss1 = _site_stats(pipe_soap)
+            st.markdown(f"""
+The **same code** (only site arguments change) run on **NEON SOAP** — Sierra mixed-conifer, CA
+(2022 3DEP at 44.7 pts/m², 477 m relief) — a structurally *opposite* ecosystem to OSBS savanna:
+
+| ecosystem | Stage-1 30 m R² | end-to-end R² | within-block R² | truth CV | recovered CV |
+|---|---|---|---|---|---|
+| OSBS — longleaf savanna (FL) | {s1_r2:.2f} | {re2e:.2f} | {we2e:.2f} | {truth_cv:.2f} | {cve2e:.2f} |
+| SOAP — Sierra conifer (CA) | {ss1:.2f} | {so:.2f} | {sw:.2f} | {scv:.2f} | {srcv:.2f} |
+
+The method transfers with no retuning. SOAP is dense forest (mostly under-canopy, where its R² is
+**0.74**); its truth is intrinsically more uniform (CV {scv:.2f}), so there is less sub-30 m signal to
+recover — but it still beats the uniform layer and recovers the heterogeneity that exists. Generality
+is the competition's key axis.
+""")
+            show_fig("pipeline_soap.png")
+        else:
+            st.info("Run `python scripts/build_pipeline_osbs.py --site soap …` for the second-ecosystem generality test.")
 
         st.markdown("""
 ### What we *don't* claim (honesty is the credibility tool)

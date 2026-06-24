@@ -92,6 +92,27 @@ which our tiled design supports as the production scale-up.
 (The GBM scores 0.63 here under the stricter 2×2 quadrant CV; §1 reports 0.77 under
 3×3 blocking — fewer, larger held-out blocks is a harder extrapolation test.)
 
+## 2b. Generality — a second, opposite ecosystem (SOAP) — `build_pipeline_osbs.py --site soap`
+
+The same pipeline, same code, run on **NEON SOAP** (Sierra mixed-conifer, CA; 2022 3DEP at
+44.7 pts/m², 477 m of ground relief; AlphaEarth 2022, UTM 11N) — a structurally *opposite*
+ecosystem to OSBS (dense mountainous forest vs open patchy savanna). Figure:
+`figures/pipeline_soap.png`.
+
+| ecosystem | Stage-1 30 m R² | end-to-end R² | within-block R² | truth CV | recovered CV |
+|---|---|---|---|---|---|
+| OSBS — longleaf savanna (FL, 2018) | 0.767 | 0.664 | 0.274 | 0.89 | 0.73 |
+| SOAP — Sierra mixed conifer (CA, 2022) | 0.779 | 0.585 | 0.141 | 0.34 | 0.25 |
+
+**Reading it.** The method transfers across two opposite structural regimes with *no code
+changes* (only site args). SOAP's **under-canopy R² is 0.742** (dense forest is mostly
+under-canopy; the −0.94 "open" R² is an artifact of having almost no open cells — a tiny,
+unstable sample, reported honestly). SOAP's truth is intrinsically more uniform (CV 0.34 vs
+OSBS 0.89), so there's less sub-30 m signal to recover (within-block 0.14 vs 0.27) — but the
+end-to-end product still beats the FastFuels uniform layer (R² ≈ 0, within-block 0, CV 0) and
+recovers most of the heterogeneity that exists. Generality is the competition's key axis; this
+is direct evidence for it.
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only

@@ -35,7 +35,7 @@ from surface_fuels import (FuelVoxelGrid, GeoRef, lidar, metrics as M,  # noqa: 
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 LAZ = os.path.join(ROOT, "data", "raw", "osbs_3dep_2018.laz")
-SRC_EPSG, TGT_EPSG, AEF_YEAR = 6438, 32617, 2018
+SRC_EPSG, TGT_EPSG, AEF_YEAR, SITE = 6438, 32617, 2018, "osbs"
 RES30, FACTOR = 30.0, 3          # fine = 10 m (AlphaEarth native); 3x3 cells per 30 m block
 RES10 = RES30 / FACTOR
 
@@ -101,10 +101,22 @@ def stats(p, truth, factor):
 
 
 def main():
+    global LAZ, SRC_EPSG, TGT_EPSG, AEF_YEAR, SITE
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--site", default=SITE)
+    ap.add_argument("--laz", default=LAZ)
+    ap.add_argument("--src-epsg", type=int, default=SRC_EPSG)
+    ap.add_argument("--target-epsg", type=int, default=TGT_EPSG)
+    ap.add_argument("--aef-year", type=int, default=AEF_YEAR)
+    ap.add_argument("--z-unit", default="ft_us", help="LAZ vertical unit: ft_us or m")
+    a = ap.parse_args()
+    SITE, LAZ, SRC_EPSG, TGT_EPSG, AEF_YEAR = a.site, a.laz, a.src_epsg, a.target_epsg, a.aef_year
+
     if not os.path.exists(LAZ):
         sys.exit(f"Missing {LAZ}")
-    print(f"Loading OSBS 3DEP {AEF_YEAR} (EPSG:{SRC_EPSG} -> UTM {TGT_EPSG})...")
-    pc = lidar.load_points(LAZ, src_epsg=SRC_EPSG, target_epsg=TGT_EPSG, z_unit="ft_us")
+    print(f"Loading {SITE.upper()} 3DEP {AEF_YEAR} (EPSG:{SRC_EPSG} -> UTM {TGT_EPSG}, z={a.z_unit})...")
+    pc = lidar.load_points(LAZ, src_epsg=SRC_EPSG, target_epsg=TGT_EPSG, z_unit=a.z_unit)
     x0, y0 = float(pc.x.min()), float(pc.y.min())
     nx30 = int((pc.x.max() - x0) // RES30); ny30 = int((pc.y.max() - y0) // RES30)
     nx10, ny10 = nx30 * FACTOR, ny30 * FACTOR
@@ -205,18 +217,18 @@ def main():
     axc.set_xticks(range(len(cvs))); axc.set_xticklabels(labels, fontsize=8, rotation=15)
     axc.set_ylabel("heterogeneity (CV)")
     axc.set_title("Spatial heterogeneity recovered (FastFuels ≈ 0)")
-    fig.suptitle(f"OSBS end-to-end: spaceborne→30 m→{RES10:.0f} m measured-structure vs FastFuels uniform "
+    fig.suptitle(f"{SITE.upper()} end-to-end: spaceborne→30 m→{RES10:.0f} m measured-structure vs FastFuels uniform "
                  f"| Stage-1 R²={rep30['r2']}, end-to-end R²={reps['End-to-end (ours)']['r2']}",
                  fontsize=12, y=0.99)
-    fp = os.path.join(ROOT, "figures", "pipeline_osbs.png")
+    fp = os.path.join(ROOT, "figures", f"pipeline_{SITE}.png")
     os.makedirs(os.path.dirname(fp), exist_ok=True); plt.savefig(fp, dpi=115, bbox_inches="tight")
     print(f"\nsaved {fp}")
 
-    np.savez_compressed(os.path.join(ROOT, "data", "processed", "pipeline_osbs.npz"),
+    np.savez_compressed(os.path.join(ROOT, "data", "processed", f"pipeline_{SITE}.npz"),
                         truth10=truth10, truth30=truth30, pred30=pred30, uniform=uniform,
                         stage1_up=stage1_up, clean=clean["downscaled"], e2e=e2e,
                         canopy30=canopy30, factor=FACTOR, x0=x0, y0=y0, res10=RES10, epsg=TGT_EPSG)
-    print("Wrote data/processed/pipeline_osbs.npz")
+    print(f"Wrote data/processed/pipeline_{SITE}.npz")
     print("\nError budget: Stage-1 carries the 30 m level (spaceborne); Stage-2 adds the within-block "
           "detail FastFuels cannot (its within-block R² is 0). End-to-end propagates Stage-1 error honestly.")
 
