@@ -86,7 +86,7 @@ def load_deliverable():
     out = {}
     for key, fn in [("Measured (3DEP LiDAR)", "osbs_measured_1m.nc"),
                     ("Generalized (spaceborne→1 m)", "osbs_generalized_1m.nc"),
-                    ("FastFuels uniform", "osbs_uniform_1m.nc")]:
+                    ("FastFuels surface (uniform per class)", "osbs_uniform_1m.nc")]:
         p = os.path.join(PROC, fn)
         if os.path.exists(p):
             out[key] = FuelVoxelGrid.from_netcdf(p)
@@ -331,11 +331,14 @@ if source.startswith("End-to-end"):
     with t_method:
         st.markdown(f"""
 ### The gap we close
-FastFuels' **canopy** fuels are genuinely 3D, but its **surface** fuels are a **LANDFIRE SB40 / FCCS
-30 m categorical lookup** → **one value per fuel class, uniform within every 30 m cell**
-(e.g. FM9 = 0.717 kg/m² everywhere). Real surface fuels are heterogeneous *below* that scale, and
-physics-based fire models (QUIC-Fire, FIRETEC) consume that heterogeneity nonlinearly. **That sub-30 m
-variation is exactly what a categorical lookup cannot represent — and what we measure.**
+FastFuels' **canopy** fuels are genuinely 3D (TreeMap trees → voxelized crowns) — but trees are
+**optional** in this challenge, which targets **surface + understory** fuels. There, FastFuels' layer
+is a **LANDFIRE SB40 / FCCS 30 m categorical lookup** → **one value per fuel class, uniform within
+every 30 m cell** (e.g. FM9 = 0.717 kg/m² everywhere). Real surface fuels are heterogeneous *below*
+that scale, and physics-based fire models (QUIC-Fire, FIRETEC) consume that heterogeneity nonlinearly.
+**That sub-30 m variation is exactly what a categorical lookup cannot represent — and what we measure.**
+*(So every "FastFuels surface" panel below is FastFuels' **surface layer** — its canopy is 3D and not
+shown; the surface is where the in-scope gap is.)*
 
 ### Our method, in one paragraph
 We measure the near-ground **bulk-density structure** directly from **3DEP LiDAR** where it exists, and
@@ -383,10 +386,12 @@ The host team's own **ForestGen3D** *generates* sub-canopy structure from ALS (a
             st.info("Run `python scripts/build_deliverable_osbs.py` to build the 1 m³ NetCDF deliverables.")
 
         st.markdown("#### End-to-end maps vs measured truth (zoom any panel — all move together)")
+        st.caption("“FastFuels surface” = FastFuels' **surface layer** (LANDFIRE→SB40, uniform per class); "
+                   "its canopy/tree fuels are 3D but optional in this challenge, so they're not shown here.")
         vmax = float(np.percentile(truth10, 98))
         st.plotly_chart(synced_heatmaps([
             {"title": "Measured 3DEP (truth)", "z": truth10, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
-            {"title": "FastFuels uniform", "z": uniform, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
+            {"title": "FastFuels surface (uniform/class)", "z": uniform, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
             {"title": "Stage-1 30 m (spaceborne)", "z": stage1_up, "cmin": 0, "cmax": vmax, "colorscale": COLORSCALE},
             {"title": f"End-to-end {res10:.0f} m (ours)", "z": e2e, "cmin": 0, "cmax": vmax,
              "colorscale": COLORSCALE, "cbar": True, "cbar_title": "kg/m² proxy"},
@@ -397,7 +402,7 @@ The host team's own **ForestGen3D** *generates* sub-canopy structure from ALS (a
         c2.metric("Within-block R² (sub-30 m)", f"{we2e:.2f}", f"FastFuels {wuni:.2f}", delta_color="off")
         c3.metric("Heterogeneity (CV)", f"{cve2e:.2f}", f"truth {truth_cv:.2f}")
         c4.metric("Stage-1 30 m R²", f"{s1_r2:.2f}", "spaceborne, blocked CV", delta_color="off")
-        names = ["FastFuels uniform", "Stage-1 30 m", "Downscaler (clean)", "End-to-end"]
+        names = ["FastFuels surface", "Stage-1 30 m", "Downscaler (clean)", "End-to-end"]
         arrs = [uniform, stage1_up, clean, e2e]
         bar = go.Figure()
         bar.add_bar(name="overall R²", x=names, y=[round(_stats(a)[0], 3) for a in arrs])
@@ -421,7 +426,7 @@ The host team's own **ForestGen3D** *generates* sub-canopy structure from ALS (a
 
 | product | overall R² | within-block R² (sub-30 m) | heterogeneity CV |
 |---|---|---|---|
-| FastFuels uniform | {_stats(uniform)[0]:.2f} | {_stats(uniform)[1]:.2f} | {_stats(uniform)[2]:.2f} |
+| FastFuels surface (uniform/class) | {_stats(uniform)[0]:.2f} | {_stats(uniform)[1]:.2f} | {_stats(uniform)[2]:.2f} |
 | Stage-1 30 m (upsampled) | {_stats(stage1_up)[0]:.2f} | {_stats(stage1_up)[1]:.2f} | {_stats(stage1_up)[2]:.2f} |
 | Downscaler (clean 30 m) | {_stats(clean)[0]:.2f} | {_stats(clean)[1]:.2f} | {_stats(clean)[2]:.2f} |
 | **End-to-end (ours)** | **{re2e:.2f}** | **{we2e:.2f}** | **{cve2e:.2f}** |
@@ -551,7 +556,7 @@ elif source.startswith("Synthetic"):
         [("Truth", scene.truth_load), ("FastFuels", scene.fastfuels_load), ("Ours", scene.ours_load)],
         vmax, synthetic_aerial_rgb(scene.truth), "Aerial RGB (synthetic)",
     ), use_container_width=True)
-    st.caption("FastFuels paints one value across the whole class (flat). Truth and Ours show the sub-metre clumping that drives fire behavior. "
+    st.caption("FastFuels' surface layer paints one value across the whole fuel-model class (flat). Truth and Ours show the sub-metre clumping that drives fire behavior. "
                "Zoom or pan any panel — they all move together.")
 
     st.subheader("Validation — vs. truth")
