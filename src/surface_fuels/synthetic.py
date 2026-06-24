@@ -289,6 +289,77 @@ def simulate_sar_obs(L, seed=12, footprint=2.5, noise=0.16, sat=1.4):
     return np.clip(saturated + rng.normal(0, noise * m, L.shape), 0, None).astype(np.float32)
 
 
+@dataclass
+class Stage1Scene:
+    target: np.ndarray            # (ny, nx) 30 m surface fuel load (kg/m²)
+    predictors: dict             # name -> (ny, nx) predictor at 30 m
+    canopy: np.ndarray           # (ny, nx) overstory cover [0, 1] (stratum split)
+    block_id: np.ndarray         # (ny, nx) spatial-block ids for blocked CV
+
+
+def make_stage1_scene(n=72, seed=3, blocks=6):
+    """Synthetic 30 m region for the Stage-1 surface-fuel regressor.
+
+    A latent vegetation/moisture field drives the true 30 m fuel load. Free
+    spaceborne predictors are *partial, noisy views* of that latent: an
+    AlphaEarth-like **embedding** (richest), Sentinel-1, Sentinel-2, and terrain.
+    Predictor skill DROPS under canopy (occlusion of the surface signal), so
+    per-stratum (open vs under-canopy) metrics are honest — and the embedding
+    ablation shows the foundation features carry the most signal.
+    """
+    rng = np.random.default_rng(seed)
+    veg = _gaussian_field((n, n), scale=8.0, rng=rng)
+    moisture = _gaussian_field((n, n), scale=12.0, rng=rng)
+    canopy = np.clip((_gaussian_field((n, n), 9.0, rng) - 0.55) / 0.35, 0, 1).astype(np.float32)
+
+    target = np.clip(0.3 + veg + 0.6 * moisture, 0.05, None).astype(np.float32)
+
+    def noise(s):
+        return rng.normal(0, s, (n, n))
+    # AlphaEarth-like embedding: rich, low-noise, sees both drivers (best single block);
+    # physical sensors are noisier partial views (S1~moisture, S2~veg canopy-attenuated).
+    predictors = {
+        "embed": (0.9 * veg + 0.8 * moisture - 0.3 * veg * canopy + noise(0.05)).astype(np.float32),
+        "s1": (0.6 * moisture + 0.3 * veg + noise(0.13)).astype(np.float32),
+        "s2": (0.8 * veg * (1 - 0.3 * canopy) + noise(0.12)).astype(np.float32),
+        "terrain": (0.2 * moisture + noise(0.25)).astype(np.float32),
+    }
+    by = (np.arange(n) * blocks // n)
+    block_id = (by[:, None] * blocks + by[None, :]).astype(int)
+    return Stage1Scene(target=target, predictors=predictors, canopy=canopy, block_id=block_id)
+
+
+@dataclass
+class DownscaleScene:
+    truth: np.ndarray    # (n, n) 1 m surface-fuel load (the ALS-derived target)
+    factor: int          # coarsening factor (1 m -> ~30 m baseline)
+    s1: np.ndarray       # ~10 m SAR covariate (canopy-penetrating, global)
+    embed: np.ndarray    # ~10 m multi-sensor / embedding covariate (S2 + AlphaEarth/Clay)
+    canopy: np.ndarray   # canopy cover (global product)
+
+
+def make_downscale_scene(n=240, seed=7, factor=30):
+    """Multi-scale surface-fuel scene for the 30 m -> 1 m downscaler.
+
+    Real surface fuels vary at *several* scales: landscape/community structure
+    (~10-40 m, recoverable from 10 m covariates) plus sub-10 m clumps (the
+    information-limited band). Globally-available 10 m covariates (Sentinel-1,
+    Sentinel-2, AlphaEarth/Clay embeddings) are simulated as blurred + noisy
+    observations that resolve the medium band but not the finest detail.
+    """
+    rng = np.random.default_rng(seed)
+    medium = 0.55 * _gaussian_field((n, n), scale=18.0, rng=rng)  # 10-40 m communities
+    fine = 0.55 * _gaussian_field((n, n), scale=2.5, rng=rng)     # sub-10 m clumps
+    truth = np.clip(0.30 + medium + fine, 0, None).astype(np.float32)
+    m = float(truth.mean())
+    s1 = np.clip(gaussian_filter(truth, 6.0, mode="reflect")
+                 + rng.normal(0, 0.12 * m, truth.shape), 0, None).astype(np.float32)
+    embed = np.clip(gaussian_filter(truth, 4.0, mode="reflect")
+                    + rng.normal(0, 0.07 * m, truth.shape), 0, None).astype(np.float32)
+    canopy = make_canopy_cover(n, n, seed=seed + 57)
+    return DownscaleScene(truth=truth, factor=factor, s1=s1, embed=embed, canopy=canopy)
+
+
 def make_fusion_scenario(nx=120, ny=120, seed=42):
     """Build the SAR+LiDAR fusion test scene."""
     truth = make_truth(nx=nx, ny=ny, nz=4, seed=seed)

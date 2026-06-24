@@ -159,8 +159,13 @@ Scores are 1–5 (5 = best), assigned from the findings. **Composite** is an unw
 >   **fusion R² 0.71** > LiDAR-only 0.51 > SAR-only 0.37 > uniform 0; under canopy **0.50 vs
 >   LiDAR −0.01** (radar fills the occlusion gap). **Real Sentinel-1 RTC** over Eglin (VH/VV +
 >   fused product) pulled ungated from Microsoft Planetary Computer.
-> - **Next:** RxCADRE clip plots (manual) for absolute calibration; Week 3 — NEON OSBS with
->   *recent* co-registered LiDAR + Sentinel-1 (removes the 2007-vs-now temporal gap).
+> - **W3 — the GLOBAL story (two-stage, build order corrected):** a global **30 m product**
+>   from spaceborne (Stage 1) is the prerequisite; a mass-conserving **30 m → 1 m downscaler**
+>   (Stage 2) sharpens it, both trained on US 3DEP and applied globally. **Downscaler POC done**
+>   (regression: within-block R² 0→0.31, mass-conserving) — but it currently uses a coarsened-3DEP
+>   *stand-in* for the 30 m input. **Next = build Stage 1 (global 30 m) first**, then re-wire the
+>   downscaler to it; later swap the regressor for **AlphaEarth/Clay embeddings + a UNet**.
+>   Full architecture + ordered tasks: [research/DOWNSCALING.md](research/DOWNSCALING.md), [TODO.md](TODO.md).
 
 ### Week 0 — now → Jun 28: Data, scaffolding, baseline
 - Download RxCADRE 2012 TLS (`RDS-2023-0011`) + ground fuel (`RDS-2014-0031`); pull OSBS NEON ALS/CHM/field via `neonutilities`; pull LANDFIRE FBFM40 baseline; register Earthdata Login and pull Sentinel-1 GRD over both sites via `asf_search`.

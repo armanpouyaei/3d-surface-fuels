@@ -51,6 +51,9 @@ not a generative guess.
 | `src/surface_fuels/lidar.py` | real LAZ → `FuelVoxelGrid` (load_points/reproject, ground DTM, voxelize, find_aoi, canopy_cover_grid, uniform_baseline) |
 | `src/surface_fuels/sar.py` | real Sentinel-1 RTC features (VV/VH/ratio/RVI) from Planetary Computer + real fused blend |
 | `src/surface_fuels/fusion.py` | canopy-weighted SAR+LiDAR blend + spatially-blocked CV + stratified metrics |
+| `src/surface_fuels/downscale.py` | 30 m→1 m downscaler (model-agnostic; mass-conserving; blocked CV) — Stage 2 |
+| `src/surface_fuels/global30.py` | Stage-1 30 m surface-fuel regressor (quantile GBM, blocked CV, conformal UQ, OOD flag, per-stratum) |
+| `src/surface_fuels/embeddings.py` | AlphaEarth fetcher — free Source Coop mirror (.vrt-indexed COGs, bottom-up, dequantized) → (64,ny,nx) for a grid |
 | `src/surface_fuels/basemap.py` | real Esri World Imagery basemap for a grid's footprint |
 | `dashboard/app.py` | Streamlit dashboard — **Synthetic** + **SAR+LiDAR fusion** + **Real Eglin** modes |
 | `scripts/make_demo_data.py` | synthetic NetCDFs + validation report |
@@ -58,6 +61,10 @@ not a generative guess.
 | `scripts/download_eglin_lidar.py` | fetch real USGS 3DEP LiDAR over Eglin (TNM Access → rockyweb, ungated) |
 | `scripts/build_eglin.py` | voxelize the LAZ → eglin_measured/uniform.nc + eglin_basemap.png (auto-open AOI) |
 | `scripts/build_sar_eglin.py` | fetch real Sentinel-1 + canopy → eglin_sar.npz (fused product) |
+| `scripts/run_downscale_demo.py` | synthetic 30 m→1 m downscaler blocked-CV table |
+| `scripts/build_downscale_eglin.py` | real 30 m→1 m downscale over Eglin → eglin_downscale.npz |
+| `scripts/run_global30_demo.py` | Stage-1 regressor POC (synthetic): blocked CV + per-stratum + conformal + ablation |
+| `scripts/build_global30_eglin.py` | real Stage-1 over Eglin tile: AEF+S1+terrain → 3DEP 30 m fuel proxy, blocked CV |
 | `data/{raw,interim,processed}/` | Data (gitignored) |
 
 ## Commands
@@ -129,8 +136,34 @@ LiDAR canopy share that orientation (verified by correlation), so they line up.
 - ✅ **Week 2:** SAR+LiDAR canopy-weighted fusion. Synthetic blocked-CV: fusion R² 0.71 vs
   LiDAR-only 0.51 / SAR-only 0.37 / uniform 0; under canopy 0.50 vs LiDAR −0.01. Real
   Sentinel-1 RTC over Eglin (VH/VV + fused product) in the dashboard.
-- ▶️ **Next:** (a) RxCADRE clip plots (manual) for real R²/RMSE + absolute calibration;
-  (b) Week 3 — NEON OSBS (recent LiDAR + S1, no temporal gap) wall-to-wall; FastFuels
-  head-to-head; export FastFuels Option C/D.
+- ✅ **Week 3 POC:** 30 m→1 m **downscaler** (regression). Synthetic blocked-CV within-block
+  R² 0→0.31, overall 0.58→0.71, mass-conserving. ⚠️ uses a **coarsened-3DEP stand-in** for
+  the 30 m input.
+
+## Global architecture — TWO STAGES, build order matters
+
+The product is global by design (see [research/DOWNSCALING.md](research/DOWNSCALING.md)):
+**Stage 1 = global 30 m surface-fuel product** from spaceborne (GEDI+S1+S2), then
+**Stage 2 = 30 m→1 m downscaler** (`downscale.py`) consumes it. Both trained over US 3DEP,
+applied globally. **Stage 1 is the prerequisite — build it first** (the downscaler POC's
+coarsened-ALS input is only a stand-in). Future: swap the downscaler regressor for
+AlphaEarth/Clay embeddings + a UNet.
+
+- ✅ **Week 3 — Stage-1 method + harness:** learned the 2025 SOTA (de Conto — *predicts
+  structure (WSCI), not fuel*), designed the improved method (`research/GLOBAL30_METHOD.md`,
+  reconciled with an adversarial critique), and built the `global30.py` harness (quantile GBM,
+  blocked CV, conformal UQ, OOD, per-stratum). Synthetic POC: AEF-like embed-only R² 0.42 >
+  physical-only 0.27, full 0.56.
+- ✅ **Stage-1 real build started:** **AlphaEarth fetcher works FREE** (Source Coop mirror,
+  no GEE — `embeddings.py`, verified 64-band over Eglin); Earthdata token unlocks GEDI; full
+  real Stage-1 pipeline runs (`build_global30_eglin.py`: AEF+S1+terrain → 3DEP 30 m fuel proxy,
+  blocked CV). **BUT the single 2007 Eglin tile gives weak R² (~0.14; AEF-only negative)** —
+  diagnosed: 2024 AEF vs 2007 LiDAR **17-yr temporal gap** + tiny homogeneous tile. The method
+  is sound (synthetic Stage-1 R² 0.56, embed-only 0.42); the real demo needs **vintage-matched,
+  larger, field-validated data**.
+- ▶️ **Next:** (1) **NEON OSBS** (recent AOP LiDAR ~2021-2023 vintage-matched to AEF + FIA/NEON
+  field truth + longleaf) for a real, validated Stage-1 run; (2) pre-validate the 3DEP→fuel
+  equation vs FIA/NEON; (3) add Sentinel-2 + GEDI predictors; (4) re-wire downscaler to the 30 m
+  output; (5) UNet upgrade. Embedding path = AlphaEarth via free S3 mirror.
 
 When adding real data, mirror the `FuelVoxelGrid` interface so dashboard/metrics work unchanged.

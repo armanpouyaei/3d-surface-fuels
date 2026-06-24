@@ -19,7 +19,7 @@ The dashboard has **two modes**:
 
 **3. Real — Eglin 3DEP LiDAR** *(Week 1+2)* — a **measured 1 m surface-fuel grid from 10 M real USGS 3DEP LiDAR points over Eglin AFB**, over **real Esri World Imagery**, vs the FastFuels-style uniform layer (measured CV 0.46, Moran's I 0.44 vs uniform 0). Plus **real Sentinel-1 SAR** (10 RTC acquisitions, Apr–Jun 2026, from Planetary Computer): the VH/VV cross-pol ratio and a real SAR+LiDAR fused product over the same footprint. Same-spot + orientation verified by LiDAR-canopy↔imagery correlation.
 
-Modules: [`voxel.py`](src/surface_fuels/voxel.py) (1 m³ grids + FastFuels NetCDF I/O), [`synthetic.py`](src/surface_fuels/synthetic.py), [`metrics.py`](src/surface_fuels/metrics.py), [`lidar.py`](src/surface_fuels/lidar.py) (LAZ → voxel grid), [`sar.py`](src/surface_fuels/sar.py) (Sentinel-1 features), [`fusion.py`](src/surface_fuels/fusion.py) (blend + blocked CV), [`basemap.py`](src/surface_fuels/basemap.py) (satellite tiles), [`dashboard/app.py`](dashboard/app.py).
+Modules: [`voxel.py`](src/surface_fuels/voxel.py) (1 m³ grids + FastFuels NetCDF I/O), [`synthetic.py`](src/surface_fuels/synthetic.py), [`metrics.py`](src/surface_fuels/metrics.py), [`lidar.py`](src/surface_fuels/lidar.py) (LAZ → voxel grid), [`sar.py`](src/surface_fuels/sar.py) (Sentinel-1 features), [`fusion.py`](src/surface_fuels/fusion.py) (blend + blocked CV), [`downscale.py`](src/surface_fuels/downscale.py) (30 m→1 m, mass-conserving), [`basemap.py`](src/surface_fuels/basemap.py) (satellite tiles), [`dashboard/app.py`](dashboard/app.py).
 
 ## Quick start
 
@@ -29,10 +29,12 @@ pip install -r requirements.txt
 
 python scripts/make_demo_data.py          # synthetic grids + validation report
 python scripts/run_fusion_demo.py         # SAR+LiDAR fusion: blocked-CV validation table
+python scripts/run_downscale_demo.py      # 30m→1m downscaler POC: blocked-CV table
 python scripts/download_eglin_lidar.py    # real USGS 3DEP LiDAR over Eglin (~33 MB)
 python scripts/build_eglin.py             # voxelize it + fetch real satellite basemap
 python scripts/build_sar_eglin.py         # fetch real Sentinel-1 + build fused product
-streamlit run dashboard/app.py            # launch the 3D dashboard (all three modes)
+python scripts/build_downscale_eglin.py   # real 30m→1m downscale over Eglin
+streamlit run dashboard/app.py            # launch the 3D dashboard
 ```
 
 ## Repository layout
@@ -55,8 +57,10 @@ CLAUDE.md                Guide for working in this repo with Claude Code
 | 0 ✅ | Synthetic pipeline, voxel model, metrics, dashboard |
 | 1 ✅ | Real Eglin LiDAR (USGS 3DEP) → 1 m bulk-density grid; real satellite basemap; measured-vs-uniform on real data |
 | 2 ✅ | SAR+LiDAR fusion (canopy-weighted blend); blocked-CV validation (fusion 0.71 vs LiDAR 0.51); real Sentinel-1 over Eglin |
-| 2+ | Co-located destructive truth (RxCADRE clip plots) for real R²/RMSE + absolute calibration |
-| 3 | NEON OSBS wall-to-wall 1 km (recent LiDAR + S1, no temporal gap); FastFuels head-to-head; export Option C/D |
-| 4 | Polish ingestion tool, write-up, package submission |
+| 3 | **Go global (two-stage):** **(3a)** build the global **30 m product** from spaceborne (GEDI+S1+S2), then **(3b)** the **30 m→1 m downscaler** consumes it. Downscaler POC done (within-block R² 0→0.31). |
+| 3b+ | Swap downscaler regressor for **AlphaEarth/Clay embeddings + UNet**; cross-ecosystem transfer test |
+| 4 | RxCADRE clip plots (absolute calibration); FastFuels head-to-head; export Option C/D; package submission |
+
+**Architecture — global by design (two stages):** a coarse **30 m surface-fuel product** from globally-free spaceborne sensors (Stage 1) is sharpened to **1 m** by a mass-conserving **downscaler** using globally-free 10 m covariates (Stage 2). Both are *trained over the US* (3DEP gives wall-to-wall targets) and *applied globally* (every input is a global sensor; only the target is US-limited). **Stage 1 is the prerequisite — build it first.** See [research/DOWNSCALING.md](research/DOWNSCALING.md) and [TODO.md](TODO.md).
 
 Full plan and rubric mapping in [IDEAS.md](IDEAS.md).
