@@ -377,9 +377,19 @@ The host team's own **ForestGen3D** *generates* sub-canopy structure from ALS (a
                       "FastFuels = 0" if "uniform" not in which.lower() else "uniform")
             c3.metric("Mean fuelbed depth (m)", f"{s['mean_depth_m']:.2f}")
             c4.metric("Voxels", f"{s['nx']}×{s['ny']}×{s['nz']}")
+            # required per-voxel properties (challenge: loading, depth, live/dead, SAVR, 3D)
+            occ = grid.bulk_density > 0
+            lf = grid.extra.get("live_fraction"); sv = grid.extra.get("savr")
+            if lf is not None and sv is not None and occ.any():
+                p1, p2, p3 = st.columns(3)
+                p1.metric("Live fraction", f"{float(np.median(lf[occ])):.2f}")
+                p2.metric("SAVR (1/m)", f"{float(np.median(sv[occ])):.0f}")
+                p3.metric("Fuel model (props)", grid.attrs.get("fuel_model_for_properties", "—"))
             st.caption("Real 1 m³ NetCDF (`data/processed/osbs_*_1m.nc`). Measured = from 3DEP; "
                        "Generalized = pure spaceborne, downscaled; Uniform = the FastFuels/SB40-style layer. "
-                       "Display is auto-coarsened for WebGL responsiveness; the file is full 1 m.")
+                       "**Required properties:** loading, depth, bulk density & 3D distribution are *measured*; "
+                       "**SAVR + live/dead** come from the Scott & Burgan SB40 fuel-model lookup (the same source "
+                       "FastFuels uses); fuel moisture stays the no-data sentinel. Display auto-coarsened; file is full 1 m.")
             st.markdown("**Property maps** — load, fuelbed depth, bulk density, occupancy, vertical profile:")
             show_fig("deliverable_osbs.png")
         else:

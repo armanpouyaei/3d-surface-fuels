@@ -36,15 +36,47 @@ NZ, DZ = 8, 1.0           # 0–8 m surface + understory + low ladder, 1 m³ vox
 AOI_CELLS10 = 51          # 51 × 10 m = 510 m AOI (aligned to the pipeline 10 m grid)
 
 
-def clean_grid(bd, x0, y0, attrs):
-    """A FuelVoxelGrid for export — bulk density only, clean attrs (no bulky extras)."""
-    return FuelVoxelGrid(bulk_density=bd.astype(np.float32), dz=DZ, dy=DZ, dx=DZ,
-                         georef=GeoRef(f"EPSG:{TGT_EPSG}", x0, y0, DZ), attrs=attrs)
+# Scott & Burgan (2005) SB40 surface fuel-model properties — characteristic SAVR (1/m,
+# surface-area-weighted Σload·sav²/Σload·sav) and live fraction (live/total load).
+# Derived from RMRS-GTR-153 Table 7 and independently verified (workflow audit, 2026-06-24).
+SB40_PROPS = {
+    "GR1": {"live_frac": 0.750, "savr_1perm": 6737.7}, "GR2": {"live_frac": 0.909, "savr_1perm": 5971.1},
+    "GR3": {"live_frac": 0.750, "savr_1perm": 4231.5}, "GS1": {"live_frac": 0.852, "savr_1perm": 6011.8},
+    "GS2": {"live_frac": 0.615, "savr_1perm": 5995.4}, "GS3": {"live_frac": 0.831, "savr_1perm": 5294.6},
+    "TU1": {"live_frac": 0.297, "savr_1perm": 5270.5}, "TL3": {"live_frac": 0.000, "savr_1perm": 5027.7},
+}
+# Representative model for OSBS longleaf-pine sandhill/savanna (wiregrass-carried frequent
+# fire under open canopy) — GR3 (humid-climate coarse grass). Configurable / per-cell-FBFM40 later.
+REP_MODEL = "GR3"
+SENTINEL = 1.23456  # challenge no-data sentinel for non-mass properties
 
 
-PROP_NOTE = ("bulk_density, fuelbed depth and load are MEASURED from LiDAR; live/dead "
-             "fraction, SAVR and fuel moisture are not LiDAR-observable and are left to the "
-             f"challenge sentinel {1.23456} (provide via species/FCCS lookup downstream).")
+def fuel_props(bd, model=REP_MODEL):
+    """Per-voxel live-fraction + SAVR arrays from the SB40 lookup: the fuel-model value in
+    occupied voxels, the no-data sentinel elsewhere. SAVR/live-dead are class properties (the
+    same lookup FastFuels uses), not LiDAR-measured — bulk density/depth/load ARE measured."""
+    occ = bd > 0
+    p = SB40_PROPS[model]
+    lf = np.where(occ, np.float32(p["live_frac"]), np.float32(SENTINEL)).astype(np.float32)
+    sv = np.where(occ, np.float32(p["savr_1perm"]), np.float32(SENTINEL)).astype(np.float32)
+    return {"live_fraction": lf, "savr": sv}
+
+
+def clean_grid(bd, x0, y0, attrs, model=REP_MODEL):
+    """A FuelVoxelGrid for export — measured bulk density + SB40-lookup SAVR/live-dead."""
+    bd = bd.astype(np.float32)
+    return FuelVoxelGrid(bulk_density=bd, dz=DZ, dy=DZ, dx=DZ,
+                         georef=GeoRef(f"EPSG:{TGT_EPSG}", x0, y0, DZ),
+                         extra=fuel_props(bd, model),
+                         attrs={**attrs, "fuel_model_for_properties": model,
+                                "savr_units": "1/m (m2 m-3)", "savr_source": f"SB40 {model} lookup",
+                                "live_fraction_source": f"SB40 {model} lookup"})
+
+
+PROP_NOTE = ("bulk_density, fuelbed depth and load are MEASURED from LiDAR; SAVR and live/dead "
+             "fraction are provided per-voxel from the Scott & Burgan SB40 fuel-model lookup (the "
+             f"same source FastFuels uses), model {REP_MODEL}; fuel moisture stays the challenge "
+             f"sentinel {SENTINEL}. Empty voxels carry the sentinel for non-mass properties.")
 
 
 def main():
@@ -77,9 +109,10 @@ def main():
 
     # FastFuels-style uniform layer for the same AOI
     uniform = lidar.uniform_baseline(measured)
+    uniform.extra = fuel_props(uniform.bulk_density)          # same SB40-lookup props
     uniform.attrs = {"scenario": "fastfuels_uniform",
                      "note": "LANDFIRE/SB40-style single-class uniform surface layer (CV→0)",
-                     **uniform.attrs}
+                     "fuel_model_for_properties": REP_MODEL, **uniform.attrs}
 
     # generalized: spaceborne→10 m end-to-end, cropped to the AOI, disaggregated to 1 m,
     # distributed vertically by the measured mean profile (spaceborne cannot resolve the
@@ -115,6 +148,9 @@ def main():
     print(f"  uniform      load mean {ul.mean():.3f} kg/m²  CV {ul.std()/ul.mean():.3f}  (FastFuels-style, flat)")
     print(f"  generalized  load mean {gl.mean():.3f} kg/m²  CV {gl.std()/gl.mean():.2f}  "
           f"| pattern corr vs measured r={r_pat:+.2f}")
+    p = SB40_PROPS[REP_MODEL]
+    print(f"  required props now present: SAVR {p['savr_1perm']:.0f} 1/m + live fraction {p['live_frac']:.2f} "
+          f"per occupied voxel (SB40 {REP_MODEL} lookup); fuel moisture = sentinel {SENTINEL}.")
 
     # ── property-maps figure ────────────────────────────────────────────────────
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
