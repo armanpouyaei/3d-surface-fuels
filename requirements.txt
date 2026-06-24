@@ -1,0 +1,28 @@
+# Core (synthetic pipeline + dashboard). Pinned to tested versions.
+numpy==2.0.2
+scipy==1.13.1
+xarray==2024.7.0
+netCDF4==1.7.2
+plotly==6.8.0
+streamlit==1.50.0
+pandas==2.3.3
+
+# Real LiDAR + basemap (Week 1 — used by src/surface_fuels/lidar.py, basemap.py).
+laspy==2.6.1
+lazrs==0.7.0          # LAZ decompression backend for laspy
+pyproj==3.6.1         # CRS reprojection (EPSG:2238 ftUS -> UTM 16N; -> 3857 for basemap)
+requests==2.32.5      # Esri World Imagery basemap fetch
+pillow==11.3.0        # decode/cache basemap PNG
+
+# Real Sentinel-1 SAR fusion (Week 2 — used by src/surface_fuels/sar.py).
+rasterio==1.4.3       # windowed COG reads + reproject of Sentinel-1 RTC
+affine==2.4.0         # target transform for reproject
+planetary-computer==1.0.0  # sign Planetary Computer asset URLs (no account needed)
+pystac-client==0.8.3  # STAC search for Sentinel-1 RTC
+
+# Later phases (Week 3+):
+# scikit-learn         # quantile random forest calibration / UQ
+# geopandas            # layerset GeoJSON (FastFuels Option D)
+# neonutilities        # NEON ALS + clip-plot truth download
+# earthaccess          # GEDI download
+# fastfuels-sdk        # FastFuels v2 API client (head-to-head + ingestion)
