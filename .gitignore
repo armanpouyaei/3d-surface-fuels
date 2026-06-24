@@ -16,6 +16,9 @@ data/processed/*.npz
 # Research scratch (synthesized into research/)
 .research_raw/
 
+# Generated diagnostic figures (regenerable from scripts)
+figures/
+
 # Secrets / tokens — never commit (token lives at ~/.edl_token, outside the repo)
 *.token
 .edl_token

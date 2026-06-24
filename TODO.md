@@ -36,11 +36,19 @@ Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
       0.604; small under-canopy bump 0.06 vs −0.05; AEF-only 0.15). AEF overlaps S1 and its structure
       signal is GEDI/canopy-top → limited understory info. Don't over-rely on AEF; the ablation is the
       credibility tool.
-- [ ] **▶️ NEXT — make the target REAL (not a proxy) + add the missing signal:**
-      (a) **NEON OSBS field plots** (herb clip DP1.10023 / litter DP1.10033 / CWD DP1.10014 via
-      `neonutilities`) → calibrate/validate the 30 m fuel target (the biggest-risk step);
-      (b) add **GEDI L2B PAVD** understory features (token works) — the signal AEF/S1 lack;
-      (c) **larger, multi-ecosystem region** (more tiles) so generality is testable.
+- [x] **AEF orientation bug fixed** — `aef_for_grid` returned north-up vs row 0 = south
+      target/S1 → AEF was fed flipped. Fixed; **REVERSES the earlier "AEF adds nothing":**
+      OSBS AEF-only R² **0.15 → 0.66** (beats physical 0.60), full **0.72**, AEF rescues
+      under-canopy (0.28 vs −0.05). `figures/global30_osbs.png`.
+- [x] **#1 NEON field validation** (`build_neon_field.py`): 79 OSBS herb clips (2018-19),
+      leave-one-plot-out — **AlphaEarth predicts field herb load R² 0.23 / Spearman 0.51**,
+      beats S1 (0.07). Validated on *real ground fuel*, not a proxy. `figures/neon_field_validation.png`.
+      (Caveat: herb component only, n≈20 plots, 0.2 m² clip vs 10 m pixel.)
+- [ ] **▶️ NEXT — #2 GEDI L2B PAVD** understory features (Earthdata token works): add 0-5 m /
+      5-10 m PAVD + PAI/cover; test if they lift the model (esp. under canopy). GEDI is sparse
+      over a small AOI — quantify footprint coverage first.
+- [ ] **#1b** add litter/CWD components for total surface load; calibrate the 3DEP proxy to field.
+- [ ] **Larger, multi-ecosystem region** (more tiles) so generality is testable.
 - [ ] **⚠️ DO FIRST — define + pre-validate the 3DEP→surface-fuel-load equation** against FIA/NEON
       (1 m fuel proxy: fuelbed depth + sub-canopy return density → kg/m²). *Everything downstream
       depends on this; if it's weak (~R² 0.3–0.4) re-scope the variable.*
