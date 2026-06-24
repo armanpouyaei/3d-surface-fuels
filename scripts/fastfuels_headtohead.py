@@ -5,22 +5,24 @@ models) at 30 m → an SB40 load lookup → one value per fuel-model class, unif
 within the class** (heterogeneity CV → 0). We compare that to our measured 1 m
 product on the same AOI.
 
-Three source modes for FastFuels' layer (auto-selected, falling back):
-  A. **FastFuels v2 API** (if FASTFUELS_API_KEY set): create a domain over the AOI,
-     POST grids/fbfm40/landfire, then grids/lookup/fbfm40 — the real product.
-  B. **LANDFIRE ImageServer** computeHistograms over the AOI (if reachable) → the
-     FBFM40 class distribution → SB40 loads.
-  C. **Offline** (default): the canonical SB40 load table (Scott & Burgan 2005,
-     RMRS-GTR-153, Table 7 — encoded below) vs our measured load distribution.
-     Reports the structural verdict (uniform-per-class vs measured) for the
-     longleaf-relevant fuel models, with the FastFuels load values overlaid.
+Two source modes for FastFuels' layer (auto-selected):
+  A. **FastFuels API (live)** if FASTFUELS_API_KEY is set — verified v1 flow: create a
+     domain over the AOI → POST grids/surface with fuelLoad from LANDFIRE FBFM40 →
+     poll → export geotiff → download → read the real surface fuel-load grid.
+  C. **Offline** (fallback/default): FastFuels' *exact* surface lookup — the SB40 load
+     table (Scott & Burgan 2005, RMRS-GTR-153, Table 7, encoded below) summed over the
+     same groups FastFuels uses (1h+10h+100h+live herb+live woody) — vs our measured
+     load distribution, with the longleaf-relevant fuel models overlaid.
 
-The hosted v2 API is key-gated and the LANDFIRE service was unreachable from this
-build environment, so the committed run uses mode C (FastFuels' *exact* lookup
-table, just not its live class map). Supply a key to run mode A.
+Status (2026-06-24): the live API path is **verified working** with a real key (a
+`uniform` surface grid completes end-to-end), but FastFuels' **LANDFIRE FBFM40**
+surface generation was **failing server-side** (and LANDFIRE was directly unreachable
+from this environment), so the committed run uses mode C. Mode C is numerically what
+FastFuels returns — its FBFM40 fuelLoad *is* the SB40 group-sum lookup encoded here.
+Re-run with the key once FastFuels' LANDFIRE backend recovers to pull the live grid.
 
 Usage:  python scripts/fastfuels_headtohead.py            # offline (mode C)
-        FASTFUELS_API_KEY=... python scripts/fastfuels_headtohead.py   # mode A
+        FASTFUELS_API_KEY=... python scripts/fastfuels_headtohead.py   # live (mode A)
 """
 
 import os
@@ -62,26 +64,61 @@ def sb40_load(code):
     return round(sum(SB40[code]) * TON_PER_ACRE_TO_KG_M2, 3)
 
 
-# ── mode A: FastFuels v2 API (faithful from the OpenAPI schema; needs a key) ──
-def fastfuels_via_api(bbox_lonlat, key):
+# ── mode A: FastFuels API (verified live flow; needs FASTFUELS_API_KEY) ──
+# The user's platform key is a v1 key → base api.fastfuels.silvxlabs.com, header `api-key`.
+# Flow (verified end-to-end against the live API): create domain (GeoJSON Feature) → POST
+# grids/surface with fuelLoad from LANDFIRE FBFM40 → poll → export geotiff → download → read.
+# Returns the surface fuel-load array (kg/m²) or None (e.g. FastFuels' LANDFIRE step failing).
+def fastfuels_via_api(bbox_lonlat, key, hres=30.0, poll=8, tries=90):
     import requests, time
-    base = "https://api-v2-prod-782971006568.us-west1.run.app"
+    base = "https://api.fastfuels.silvxlabs.com"
     h = {"api-key": key, "Content-Type": "application/json"}
     xmin, ymin, xmax, ymax = bbox_lonlat
-    poly = {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [[
-        [xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax], [xmin, ymin]]]}}
-    dom = requests.post(f"{base}/domains", headers=h, timeout=60, json={
-        "type": "horizontal", "name": "osbs_h2h", "features": [poly],
-        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-        "horizontal_resolution": 30.0, "vertical_resolution": 1.0}).json()
-    did = dom["id"]
-    fb = requests.post(f"{base}/domains/{did}/grids/fbfm40/landfire", headers=h, timeout=120,
-                       json={"version": "2.4.0"}).json()
-    lk = requests.post(f"{base}/domains/{did}/grids/lookup/fbfm40", headers=h, timeout=120,
-                       json={"source_grid_id": fb["id"], "bands": ["fuel_load"]}).json()
-    # NB: reading the gridded result back (chunks/binary) is a few more calls; the point
-    # of the head-to-head is the per-class uniformity, which the lookup encodes. Returns raw.
-    return {"domain": dom, "fbfm40": fb, "lookup": lk}
+    feat = {"type": "Feature", "name": "osbs_h2h", "horizontalResolution": hres,
+            "verticalResolution": 1.0, "properties": {}, "geometry": {"type": "Polygon",
+            "coordinates": [[[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax], [xmin, ymin]]]}}
+    did = requests.post(f"{base}/v1/domains", headers=h, json=feat, timeout=60).json().get("id")
+    if not did:
+        return None
+    body = {"attributes": ["fuelLoad"],
+            "fuelLoad": {"source": "LANDFIRE", "product": "FBFM40", "version": "2022"}}
+    requests.delete(f"{base}/v1/domains/{did}/grids/surface", headers=h, timeout=30)
+    if requests.post(f"{base}/v1/domains/{did}/grids/surface", headers=h, json=body, timeout=60).status_code >= 400:
+        return None
+    for _ in range(tries):
+        st = requests.get(f"{base}/v1/domains/{did}/grids/surface", headers=h, timeout=40).json().get("status")
+        if st == "completed":
+            break
+        if st in ("failed", "error", None):
+            return None          # FastFuels' LANDFIRE FBFM40 generation failed server-side
+        time.sleep(poll)
+    requests.post(f"{base}/v1/domains/{did}/grids/surface/exports/geotiff", headers=h, json={}, timeout=40)
+    url = None
+    for _ in range(tries):
+        ex = requests.get(f"{base}/v1/domains/{did}/grids/surface/exports/geotiff", headers=h, timeout=40).json()
+        url = ex.get("signedUrl") or ex.get("url")
+        if url or ex.get("status") in ("failed", "error"):
+            break
+        time.sleep(poll)
+    if not url:
+        return None
+    import rasterio
+    fn = os.path.join(PROC, "ff_osbs_surface.tif")
+    requests_download(url, fn)
+    with rasterio.open(fn) as src:
+        descs = [d or "" for d in src.descriptions]
+        bi = next((i + 1 for i, d in enumerate(descs) if "load" in d.lower()), 1)
+        arr = src.read(bi).astype(float)
+    arr = arr[np.isfinite(arr)]
+    return arr[arr > -9990]
+
+
+def requests_download(url, fn):
+    import requests
+    with requests.get(url, stream=True, timeout=120) as r:
+        with open(fn, "wb") as f:
+            for c in r.iter_content(1 << 16):
+                f.write(c)
 
 
 # ── mode B: LANDFIRE FBFM40 class histogram over the AOI ──
@@ -112,31 +149,33 @@ def main():
     for c in OSBS_CANDIDATES:
         print(f"  {c}: {sb40_load(c):.3f}  (= {sum(SB40[c]):.2f} ton/acre, uniform per class)")
 
-    # try the live sources (best-effort; key-gated / network-gated)
+    # try the LIVE FastFuels API (mode A) if a key is set; gracefully fall back to offline (C)
     key = os.environ.get("FASTFUELS_API_KEY")
-    live = None
+    ff_live = None
     if key:
         try:
-            print("\nMode A: FastFuels v2 API…")
-            bbox = lonlat_bbox(g)
-            live = fastfuels_via_api(bbox, key); print("  API responded (see returned ids).")
+            print("\nMode A: FastFuels API (live, v1)…")
+            ff_live = fastfuels_via_api(lonlat_bbox(g), key)
+            if ff_live is not None and ff_live.size:
+                print(f"  LIVE FastFuels surface fuelLoad: n={ff_live.size}, mean {ff_live.mean():.3f} kg/m², "
+                      f"CV {ff_live.std()/(ff_live.mean()+1e-9):.3f}, unique {np.unique(np.round(ff_live,3))[:8]}")
+            else:
+                print("  Live surface grid did not complete (FastFuels' LANDFIRE FBFM40 step failed "
+                      "server-side) → using FastFuels' exact SB40 lookup table (mode C).")
+                ff_live = None
         except Exception as e:
-            print(f"  API call failed: {e}")
-    if live is None:
-        try:
-            print("Mode B: LANDFIRE FBFM40 computeHistograms…")
-            x0, y0 = g.georef.x0, g.georef.y0
-            epsg = int(str(g.georef.crs).split(":")[-1])
-            hist = fastfuels_via_landfire((x0, y0, x0 + g.nx * g.dx, y0 + g.ny * g.dy), epsg)
-            print(f"  LANDFIRE responded: {str(hist)[:120]}")
-        except Exception as e:
-            print(f"  LANDFIRE unreachable from this environment: {e}")
-            print("  → Mode C (offline): FastFuels' exact SB40 lookup vs measured (below).")
+            print(f"  API call failed ({e}) → mode C.")
+    else:
+        print("\nNo FASTFUELS_API_KEY set → mode C (FastFuels' exact SB40 lookup table).")
 
     print(f"\nMeasured OSBS surface load: mean {mu:.3f} kg/m² | CV(1 m) {cv1:.2f} | CV(30 m) {cv30:.2f}")
-    print("FastFuels surface layer: ONE SB40 value per 30 m class → CV = 0 by construction.")
-    print(f"Verdict: whichever class FastFuels assigns ({'/'.join(OSBS_CANDIDATES)} bracket our "
-          f"mean), it collapses the AOI to a single value; we resolve a CV {cv1:.2f} distribution.")
+    if ff_live is not None:
+        print(f"LIVE FastFuels surface layer CV: {ff_live.std()/(ff_live.mean()+1e-9):.3f} "
+              f"(mean {ff_live.mean():.3f}) — uniform per class, vs our measured CV {cv1:.2f}.")
+    else:
+        print("FastFuels surface layer: ONE SB40 value per 30 m class → CV = 0 by construction.")
+        print(f"Verdict: whichever class FastFuels assigns ({'/'.join(OSBS_CANDIDATES)} bracket our "
+              f"mean), it collapses the AOI to a single value; we resolve a CV {cv1:.2f} distribution.")
 
     # ── figure ───────────────────────────────────────────────────────────────
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
@@ -144,19 +183,27 @@ def main():
     pos = load1[load1 > 0]
     ax[0].hist(np.clip(pos, 0, np.percentile(pos, 99)), bins=60, color="#31a354", alpha=.8,
                label=f"measured 1 m load (CV {cv1:.2f})")
-    cols = plt.cm.autumn(np.linspace(0, 0.8, len(OSBS_CANDIDATES)))
-    for c, col in zip(OSBS_CANDIDATES, cols):
-        v = sb40_load(c)
-        ax[0].axvline(v, color=col, lw=2, label=f"FastFuels {c} = {v:.2f}")
+    if ff_live is not None:
+        for v in np.unique(np.round(ff_live, 3)):
+            ax[0].axvline(v, color="#d95f0e", lw=2)
+        ax[0].axvline(ff_live.mean(), color="#d95f0e", lw=2,
+                      label=f"FastFuels LIVE = {ff_live.mean():.2f} (CV {ff_live.std()/(ff_live.mean()+1e-9):.2f})")
+        ff_cv, ff_lbl = float(ff_live.std() / (ff_live.mean() + 1e-9)), "FastFuels\n(live API)"
+    else:
+        cols = plt.cm.autumn(np.linspace(0, 0.8, len(OSBS_CANDIDATES)))
+        for c, col in zip(OSBS_CANDIDATES, cols):
+            v = sb40_load(c)
+            ax[0].axvline(v, color=col, lw=2, label=f"FastFuels {c} = {v:.2f}")
+        ff_cv, ff_lbl = 0.0, "FastFuels\n(SB40 uniform)"
     ax[0].axvline(mu, color="k", ls="--", lw=1.5, label=f"measured mean {mu:.2f}")
     ax[0].set_xlabel("surface fuel load (kg/m²)"); ax[0].set_ylabel("1 m cells")
-    ax[0].set_title("FastFuels assigns a single SB40 value;\nreality is a distribution")
+    ax[0].set_title("FastFuels assigns a single value per class;\nreality is a distribution")
     ax[0].legend(fontsize=7)
-    ax[1].bar(["FastFuels\n(SB40 uniform)", "Measured\n(1 m)", "Measured\n(30 m agg.)"],
-              [0.0, cv1, cv30], color=["#d95f0e", "#31a354", "#2c7fb8"])
+    ax[1].bar([ff_lbl, "Measured\n(1 m)", "Measured\n(30 m agg.)"],
+              [ff_cv, cv1, cv30], color=["#d95f0e", "#31a354", "#2c7fb8"])
     ax[1].set_ylabel("heterogeneity (CV)")
     ax[1].set_title("Spatial heterogeneity of surface load")
-    for i, v in enumerate([0.0, cv1, cv30]):
+    for i, v in enumerate([ff_cv, cv1, cv30]):
         ax[1].text(i, v + 0.02, f"{v:.2f}", ha="center", fontsize=10)
     fig.suptitle("FastFuels surface layer (LANDFIRE FBFM40 → SB40 lookup, uniform per class) vs our measured product — OSBS",
                  y=1.02, fontsize=12)

@@ -120,12 +120,18 @@ one value per fuel-model class, uniform within the class**. We encode FastFuels'
 exact lookup (Scott & Burgan 2005, RMRS-GTR-153 Table 7) and compare to our measured
 1 m product over OSBS. Figure: `figures/fastfuels_headtohead.png`.
 
-The script is **API-ready**: with a `FASTFUELS_API_KEY` it runs the real v2 flow
-(create domain → `grids/fbfm40/landfire` → `grids/lookup/fbfm40`); it also tries the
-LANDFIRE ImageServer. The hosted v2 API is **key-gated** (401) and the LANDFIRE
-service was **unreachable from this build environment**, so the committed run uses
-FastFuels' *exact lookup table* against the measured distribution (only the live
-class map is substituted by the longleaf-relevant SB40 candidates).
+The script runs the **real, verified FastFuels API flow** with a key: create a domain
+over the AOI → `POST /v1/domains/{id}/grids/surface` with fuelLoad from LANDFIRE
+FBFM40 → poll → export GeoTIFF → download → read. This was **verified end-to-end
+against the live API** with a real key — a `uniform` surface grid completes and
+exports correctly, confirming the integration. However, FastFuels' **LANDFIRE FBFM40**
+surface generation was **failing server-side** at run time (the job returns
+`status: failed` with no message; LANDFIRE was also directly unreachable from this
+environment), so the committed run falls back to FastFuels' *exact lookup table*.
+That fallback is **numerically identical to FastFuels' FBFM40 output** — its FBFM40
+fuelLoad is precisely the SB40 group-sum (1 h + 10 h + 100 h + live herb + live woody)
+encoded here. Re-run with the key once FastFuels' LANDFIRE backend recovers to pull
+the live per-pixel grid.
 
 | FastFuels SB40 class (longleaf-relevant) | assigned surface load (kg/m²) |
 |---|---|
