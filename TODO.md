@@ -1,5 +1,58 @@
 # TODO — build plan
 
+## 🎯 Prioritized roadmap to submission — deadline **2026-07-20** (~4 weeks)
+
+Goal: **win.** Judged on utility, generality, data cost, clarity, **validation
+credibility**, relevance to surface/understory, scalability. The method + dashboard are
+built and validated (see [research/RESULTS.md](research/RESULTS.md)); the gaps now are
+**field-calibrated credibility** and the **required submission artifacts**.
+
+### P0 — submission-critical (must land before Jul 20)
+- [ ] **P0.1 — Validation document** (the most differentiating artifact). Turn RESULTS.md
+      into a formal write-up: truth datasets, spatially-blocked-CV methodology, metrics
+      (R²/RMSE, within-block, CV/heterogeneity, conformal coverage), per-stratum, the
+      FastFuels + de Conto head-to-heads, generality (OSBS↔SOAP), and an explicit
+      limitations/uncertainty section. Lead with it.
+- [ ] **P0.2 — Field-calibrate structure → absolute load (kg/m²).** Today magnitudes are
+      literature-anchored. Calibrate + report **real R²/RMSE vs destructive/TLS/field**
+      truth — RxCADRE clip plots (`RDS-2014-0031`), NEON herb (`DP1.10023`), SERDP
+      RC19-1064 TLS. Removes the biggest credibility gap. *(Honest: proxy = woody/under-
+      story structure; calibrate per stratum, don't conflate with herb.)*
+- [ ] **P0.3 — Python visualization/ingestion tool** (required deliverable). Package the
+      dashboard + a clean, documented standalone API: read/write FastFuels **Option C**
+      NetCDF, load any of our products, render 3D + maps. Pip-installable / one-command run.
+- [ ] **P0.4 — Finalize + validate FastFuels exports.** Confirm our 1 m NetCDF ingests via
+      the FastFuels API (Option C) and emit a **layerset GeoJSON (Option D)**. Re-run the
+      **live FastFuels surface head-to-head** once their LANDFIRE backend recovers
+      (`fastfuels_headtohead.py` is API-ready).
+- [ ] **P0.5 — Submission package**: georeferenced 1 m arrays + property maps + 3D
+      renderings + the validation doc + the viz tool, assembled per the challenge formats.
+
+### P1 — strengthen the win (generality + completeness)
+- [ ] **P1.1 — Add 3–5 more 3DEP+AEF training sites** across ecosystems (eastern hardwood
+      e.g. HARV, western shrub/grassland, more southern pine). Widens in-distribution,
+      improves the portable model, hardens the **generality** claim; re-report leave-one-
+      site-out (currently weak: −0.18/−0.45 with only 2 opposite sites).
+- [ ] **P1.2 — Total surface load**, not just structure: add **litter + fine/coarse woody
+      debris** components; reconcile herb vs woody; report total kg/m² (the challenge's
+      headline quantity) with per-component breakdown.
+- [ ] **P1.3 — Real SAR+LiDAR fusion end-to-end** (currently synthetic fusion + real S1
+      separate). Demonstrate the under-canopy fill on real data, with metrics.
+- [ ] **P1.4 — de Conto head-to-head at training scale** (train their CNN on pooled multi-
+      site data) so the comparison isn't only AOI-scale where the CNN is data-starved.
+
+### P2 — stretch / post-submission
+- [ ] **P2.1 — Stage-2 UNet/Clay downscaler** (replace per-pixel model-reuse with a learned
+      UNet on Clay/AlphaEarth embeddings + mass-conservation loss; `torch`+MPS ready).
+- [ ] **P2.2 — GEDI regional understory PAVD** as a covariate (sparse → regional interpolation).
+- [ ] **P2.3 — Global production scale-up** (tiling / cloud-native) — design-supported;
+      demonstrate on one tiled region.
+- [ ] **P2.4 — Conformal-coverage + OOD validation report** across held-out sites.
+
+---
+
+## Build-log / detailed status (below is the chronological record)
+
 Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
 [research/DOWNSCALING.md](research/DOWNSCALING.md) for the architecture.
 
