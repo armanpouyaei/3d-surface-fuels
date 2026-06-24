@@ -108,6 +108,13 @@ def load_ff_canopy():
 
 
 @st.cache_data(show_spinner=False)
+def load_aoi_basemap(west, south, east, north, epsg, px=512):
+    """Esri World Imagery RGB for a generated AOI footprint (cached per bbox)."""
+    from surface_fuels import basemap
+    return basemap.fetch_basemap_rgb((west, south, east, north), int(epsg), px)
+
+
+@st.cache_data(show_spinner=False)
 def load_deconto():
     """de Conto head-to-head arrays (scripts/deconto_headtohead.py)."""
     p = os.path.join(PROC, "deconto_headtohead.npz")
@@ -270,6 +277,22 @@ def synced_heatmaps(panels):
     fig.update_xaxes(matches="x", showticklabels=False)
     fig.update_yaxes(matches="y", autorange="reversed", showticklabels=False)
     fig.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0), dragmode="zoom")
+    return fig
+
+
+def rgb_vs_structure(rgb, pred, vmax):
+    """Real Esri satellite RGB next to the predicted structure (both north-up).
+    ``rgb`` is row 0 = north (go.Image origin top); ``pred`` is row 0 = south
+    (go.Heatmap origin bottom) — so both render north-up with no flipping."""
+    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.04,
+                        subplot_titles=["🛰️ Esri satellite (real)", "Predicted surface structure"])
+    if rgb is not None:
+        fig.add_trace(go.Image(z=rgb), row=1, col=1)
+    fig.add_trace(go.Heatmap(z=pred, zmin=0, zmax=vmax, colorscale=COLORSCALE,
+                             colorbar=dict(title="kg/m²")), row=1, col=2)
+    fig.update_xaxes(showticklabels=False)
+    fig.update_yaxes(showticklabels=False)
+    fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0))
     return fig
 
 
@@ -580,43 +603,59 @@ property maps and this interactive tool.
 
 # ===================== GENERATE ANYWHERE (GLOBAL) =====================
 elif source.startswith("🌍"):
+    import math
     from surface_fuels import portable
+    from streamlit_folium import st_folium
+    import folium
+    ESRI_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     st.subheader("🌍 Generate the 3D surface-fuel product anywhere")
     st.markdown(
-        "Pick **any location on Earth** → fetch AlphaEarth + Sentinel-1 for that AOI → run the "
-        "**portable model** (trained on US 3DEP; predictors are global & free) → 30 m → 1 m structure. "
-        "No local LiDAR needed. First run for a spot downloads data (~1–2 min), then it's **cached**.")
+        "**Click the satellite map to drop the AOI square; use the size slider to resize it** → fetch "
+        "AlphaEarth + Sentinel-1 for it → run the **portable model** (trained on US 3DEP; predictors global "
+        "& free) → 30 m → 1 m structure. No local LiDAR. First run downloads data (~1–2 min), then **cached**.")
     if portable.load() is None:
         st.warning("Portable model not built yet — run `python scripts/train_portable.py`.")
         st.stop()
 
-    # (lat, lon, default AEF year). The two US sites default to their TRAINING vintage
-    # (OSBS-2018, SOAP-2022) — AlphaEarth drifts year-to-year, so a matching year is
-    # in-distribution; other years/places flag OOD (honest, conservative).
+    # (lat, lon, default AEF year). US sites default to their TRAINING vintage (AEF drifts yearly).
     PRESETS = {
         "OSBS savanna (FL, US) — training site": (29.69, -81.99, 2018),
         "SOAP conifer (CA, US) — training site": (37.03, -119.26, 2022),
         "Yosemite (CA, US)": (37.75, -119.59, 2022), "Konza prairie (KS, US)": (39.10, -96.56, 2022),
-        "Amazon rainforest (BR)": (-3.10, -60.02, 2022), "Custom…": None,
+        "Amazon rainforest (BR)": (-3.10, -60.02, 2022),
     }
     with st.sidebar:
         st.header("Location")
-        preset = st.selectbox("Preset", list(PRESETS), index=0)
-        if PRESETS[preset] is not None:
-            lat, lon, pyear = PRESETS[preset]
-            st.write(f"📍 {lat:.4f}, {lon:.4f}")
-        else:
-            lat = st.number_input("Latitude", -60.0, 70.0, 29.69, format="%.4f")
-            lon = st.number_input("Longitude", -180.0, 180.0, -81.99, format="%.4f")
-            pyear = 2022
-        size = st.slider("AOI size (m)", 400, 1500, 1200, step=100,
-                         help="Capped at 1500 m so generation stays within memory (no OOM).")
+        preset = st.selectbox("Jump map to", list(PRESETS), index=0)
+        clat, clon, pyear = PRESETS[preset]
         year = st.select_slider("AlphaEarth year", options=list(range(2017, 2025)), value=pyear,
                                 help="Training vintages: OSBS 2018, SOAP 2022. Off-vintage years read as OOD.")
-        est = portable.aoi_memory_estimate(float(size))
-        st.caption(f"🧠 {est['n10']}×{est['n10']} @10 m · ~{est['predict_mb']:.0f} MB to generate · "
-                   f"1 m export ~{est['export_1m_mb']:.0f} MB")
-        go_btn = st.button("Generate ▶", type="primary")
+        size = st.slider("AOI square size (m)", 400, int(portable.MAX_AOI_M), 1000, step=100,
+                         help="Side of the square AOI. Click the map to place it; capped for memory safety.")
+
+    # center = last clicked point (per-preset state) else the preset center; click moves the square
+    mapkey = "aoi_map_%d" % list(PRESETS).index(preset)
+    pc = (st.session_state.get(mapkey) or {}).get("last_clicked")
+    lat, lon = (pc["lat"], pc["lng"]) if pc else (clat, clon)
+    dlat = size / 111320.0 / 2.0
+    dlon = size / (111320.0 * max(math.cos(math.radians(lat)), 1e-3)) / 2.0
+    fmap = folium.Map(location=[lat, lon], zoom_start=15, tiles=None, control_scale=True)
+    folium.TileLayer(ESRI_TILES, attr="Esri World Imagery", name="Satellite").add_to(fmap)
+    folium.Rectangle(bounds=[[lat - dlat, lon - dlon], [lat + dlat, lon + dlon]], color="#ffec3d",
+                     weight=2, fill=True, fill_opacity=0.12, tooltip=f"AOI {size:.0f} m square").add_to(fmap)
+    folium.CircleMarker([lat, lon], radius=4, color="#ffec3d", fill=True, fill_opacity=1,
+                        tooltip="AOI center — click elsewhere to move").add_to(fmap)
+    map_state = st_folium(fmap, height=440, use_container_width=True,
+                          returned_objects=["last_clicked"], key=mapkey)
+    nc = (map_state or {}).get("last_clicked")
+    if nc:
+        lat, lon = nc["lat"], nc["lng"]   # newest click this run
+
+    est = portable.aoi_memory_estimate(float(size))
+    c_sel, c_go = st.columns([3, 1])
+    c_sel.caption(f"⬛ AOI square: center ({lat:.4f}, {lon:.4f}) · {size:.0f} m · 🧠 {est['n10']}×{est['n10']} "
+                  f"@10 m ≈ {est['predict_mb']:.0f} MB · *click map to move, slider to resize*")
+    go_btn = c_go.button("Generate ▶", type="primary", use_container_width=True)
 
     if go_btn:
         try:
@@ -626,7 +665,7 @@ elif source.startswith("🌍"):
             st.error(f"Could not generate: {e}")
     out = st.session_state.get("aoi")
     if out is None:
-        st.info("Set a location in the sidebar and click **Generate ▶**.")
+        st.info("Draw a rectangle on the map (or click a point), then press **Generate ▶**.")
         st.stop()
 
     pred, ood = out["pred10"], out["ood"]
@@ -643,6 +682,17 @@ elif source.startswith("🌍"):
     st.caption(f"{'⚡ cached' if out.get('cached') else '🛰️ freshly generated'} · AlphaEarth {out['year']} · "
                f"{'with' if out.get('has_s1') else 'no'} Sentinel-1 · EPSG:{int(out['epsg'])} · "
                "*predicted* surface structure — no local truth here, so read the uncertainty + OOD maps.")
+
+    # satellite RGB next to the predicted structure (the visual sanity check)
+    ny0, nx0 = pred.shape
+    west, south = float(out["x0"]), float(out["y0"])
+    east, north = west + nx0 * out["res"], south + ny0 * out["res"]
+    with st.spinner("Fetching Esri satellite imagery for the AOI…"):
+        rgb = load_aoi_basemap(west, south, east, north, int(out["epsg"]))
+    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6)),
+                    use_container_width=True)
+    st.caption("Left: real Esri World Imagery for the exact AOI footprint. Right: model-predicted surface "
+               "structure — eyeball the correspondence (denser vegetation ↔ higher predicted structure).")
 
     st.plotly_chart(voxel_figure(portable.display_grid(pred, out["res"]), threshold, opacity,
                                  f"Predicted 3D structure @ ({lat:.3f}, {lon:.3f})"), use_container_width=True)
