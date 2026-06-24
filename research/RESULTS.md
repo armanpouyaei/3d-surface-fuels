@@ -152,6 +152,18 @@ load spans ~0–2.7 kg/m² (CV 1.13). Independent cross-check: **GS2 = 0.58 kg/m
 magnitude is well-anchored to FastFuels' own table while we add the spatial
 structure it cannot represent.
 
+**Surface vs canopy — FastFuels' OWN 3D product, pulled live** (`build_fastfuels3d_osbs.py`,
+verified flow). With the API key we ran the real v1 flow over OSBS: create domain →
+TreeMap tree inventory → **voxelized tree/canopy grid** (`grids/tree`, completed) →
+zarr export → read. FastFuels' canopy bulk density comes back as a **33 m-tall 1 m³
+voxel field** (`figures/fastfuels_canopy3d.png`, `data/processed/ff_osbs_canopy3d.nc`):
+genuinely 3D and lumpy (col-max CV 6.78, ~1.3 % voxels occupied — scattered savanna
+trees). This makes the point concrete: **FastFuels' 3D structure is the trees; its
+surface layer is the uniform slab beneath.** Trees are *optional* in this challenge —
+the in-scope **surface** layer is the one FastFuels renders flat and we make 3D.
+(The `grids/surface` LANDFIRE-FBFM40 step failed server-side at run time, so the
+combined surface+tree export wasn't available; the tree grid is the canopy shown.)
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only

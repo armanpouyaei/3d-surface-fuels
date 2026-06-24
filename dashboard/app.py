@@ -94,6 +94,20 @@ def load_deliverable():
 
 
 @st.cache_data(show_spinner=False)
+def load_ff_canopy():
+    """FastFuels' own voxelized canopy 3D grid pulled live (build_fastfuels3d_osbs.py)."""
+    p = os.path.join(PROC, "ff_osbs_3d.npz")
+    if not os.path.exists(p):
+        return None
+    d = np.load(p)
+    if "canopy_bulk_density" not in d:
+        return None
+    return FuelVoxelGrid(bulk_density=d["canopy_bulk_density"], dz=float(d["dz"]),
+                         dy=float(d["dx"]), dx=float(d["dx"]),
+                         attrs={"scenario": "fastfuels_canopy3d"})
+
+
+@st.cache_data(show_spinner=False)
 def load_deconto():
     """de Conto head-to-head arrays (scripts/deconto_headtohead.py)."""
     p = os.path.join(PROC, "deconto_headtohead.npz")
@@ -362,6 +376,23 @@ The host team's own **ForestGen3D** *generates* sub-canopy structure from ALS (a
 """)
         show_fig("pipeline_osbs.png",
                  "End-to-end at OSBS: spaceborne → 30 m → 10 m, vs measured 3DEP truth and the FastFuels uniform layer.")
+
+        st.markdown("#### FastFuels' OWN 3D product over OSBS — pulled live from the API")
+        st.markdown(
+            "To make the surface-vs-canopy point concrete, here is **FastFuels' actual output** for this AOI, "
+            "pulled live (domain → TreeMap inventory → voxelized tree grid). Its 3D structure is **trees**; "
+            "the **surface** layer beneath is the uniform LANDFIRE→SB40 slab — *that* is what we make 3D.")
+        show_fig("fastfuels_canopy3d.png")
+        ffc = load_ff_canopy()
+        if ffc is not None:
+            st.plotly_chart(voxel_figure(ffc, threshold, opacity, "FastFuels canopy (TreeMap-voxelized, live)"),
+                            use_container_width=True)
+            occ = ffc.bulk_density > 0
+            st.caption(f"FastFuels' real canopy: {ffc.nz} m tall, {100*occ.mean():.1f}% voxels occupied (sparse savanna "
+                       "trees), genuinely 3D and lumpy. Its surface layer is uniform per fuel-model class (CV 0). "
+                       "Canopy/trees are *optional* in this challenge; the in-scope **surface** layer is where the gap "
+                       "is. (The combined surface+tree export needs FastFuels' LANDFIRE surface backend, which was "
+                       "failing server-side at run time, so this shows the tree/canopy grid.)")
 
     # ---------------- PRODUCT & RESULTS ----------------
     with t_product:
