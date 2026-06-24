@@ -98,17 +98,36 @@ def main():
             preds[f"aef{i:02d}"] = deq[i].astype(np.float32); aef_keys.append(f"aef{i:02d}")
         print("  AlphaEarth -> all 64 bands")
 
-    def run(p, label):
+    def run(p):
         out = g30.blocked_cv(target, p, block_id, conformal=True)
-        rep = g30.evaluate(out, target, canopy)
-        print(f"  {label:<34} R2 {rep['r2']:>6}  open {rep['r2_open']:>6}  canopy {rep['r2_under_canopy']:>6}  cov {rep['interval_coverage']:>5}")
-        return rep
+        return out, g30.evaluate(out, target, canopy)
 
     print(f"\nSpatially-blocked CV (real 30 m {args.site}, vs 3DEP fuel proxy):")
-    run(preds, "full (AEF + S1 + terrain + canopy)")
-    run({k: v for k, v in preds.items() if k not in aef_keys}, "physical only (S1 + terrain + canopy)")
+    sets = {"full": preds, "physical": {k: v for k, v in preds.items() if k not in aef_keys}}
     if aef_keys:
-        run({k: preds[k] for k in aef_keys}, "AlphaEarth only")
+        sets["AEF-only"] = {k: preds[k] for k in aef_keys}
+    outs, reps = {}, {}
+    for label, p in sets.items():
+        outs[label], reps[label] = run(p)
+        r = reps[label]
+        print(f"  {label:<12} R2 {r['r2']:>6}  open {r['r2_open']:>6}  canopy {r['r2_under_canopy']:>6}  cov {r['interval_coverage']:>5}")
+
+    # ---- figure: ablation bars + predicted-vs-observed (full) ----
+    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4.6))
+    methods = list(reps); strata = [("overall", "r2"), ("open", "r2_open"), ("under-canopy", "r2_under_canopy")]
+    xs = np.arange(len(methods)); w = 0.26
+    for i, (sl, key) in enumerate(strata):
+        ax[0].bar(xs + (i - 1) * w, [reps[m][key] for m in methods], w, label=sl)
+    ax[0].set_xticks(xs); ax[0].set_xticklabels(methods); ax[0].axhline(0, color="k", lw=.6)
+    ax[0].set_ylabel("R²"); ax[0].set_title(f"{args.site.upper()} Stage-1 ablation (blocked CV)"); ax[0].legend(fontsize=8)
+    t, p = target.ravel(), outs["full"]["median"].ravel()
+    ax[1].scatter(t, p, s=10, alpha=.4, color="#2c7fb8"); lim = [0, max(t.max(), p.max())]
+    ax[1].plot(lim, lim, "r--", lw=1); ax[1].set_xlabel("3DEP fuel proxy (target, kg/m²)")
+    ax[1].set_ylabel("predicted (kg/m²)"); ax[1].set_title(f"full model — R²={reps['full']['r2']}, coverage={reps['full']['interval_coverage']}")
+    plt.tight_layout(); fig_path = os.path.join(ROOT, "figures", f"global30_{args.site}.png")
+    os.makedirs(os.path.dirname(fig_path), exist_ok=True); plt.savefig(fig_path, dpi=110)
+    print(f"  saved {fig_path}")
 
     np.savez_compressed(os.path.join(ROOT, "data", "processed", f"global30_{args.site}.npz"),
                         target=target, canopy=canopy, aef_available=aef is not None)

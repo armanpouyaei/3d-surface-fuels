@@ -130,7 +130,9 @@ def aef_for_grid(grid, year=2024, zone=None) -> Optional[np.ndarray]:
                 reproject(deq, dst, src_transform=src_t, src_crs=src.crs,
                           dst_transform=dst_t, dst_crs=f"EPSG:{epsg}",
                           resampling=Resampling.average)
-        return dst
+        # dst is north-up (row 0 = north); flip to row 0 = south to match the rest
+        # of the codebase (FuelVoxelGrid targets, sar.py, lidar.py all use row 0 = south).
+        return dst[:, ::-1, :].copy()
     except Exception as e:  # noqa
         import sys
         print("aef_for_grid error:", repr(e)[:160], file=sys.stderr)
