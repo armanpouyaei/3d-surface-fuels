@@ -295,8 +295,9 @@ st.caption(
 
 with st.sidebar:
     st.header("Data source")
-    source = st.radio("", ["End-to-end — OSBS (spaceborne→1 m)", "Synthetic longleaf demo",
-                           "SAR + LiDAR fusion (synthetic)", "Real — Eglin 3DEP LiDAR"], index=0)
+    source = st.radio("", ["End-to-end — OSBS (spaceborne→1 m)", "🌍 Generate anywhere (global)",
+                           "Synthetic longleaf demo", "SAR + LiDAR fusion (synthetic)",
+                           "Real — Eglin 3DEP LiDAR"], index=0)
     st.divider()
     threshold = st.slider("Min bulk density shown (kg/m³)", 0.0, 1.0, 0.02, step=0.02)
     opacity = st.slider("Volume opacity", 0.05, 0.6, 0.2, step=0.05)
@@ -576,6 +577,96 @@ property maps and this interactive tool.
 """)
         st.caption("Every number here is reproduced live from the committed real-data runs — "
                    "see research/RESULTS.md for the full evidence log.")
+
+# ===================== GENERATE ANYWHERE (GLOBAL) =====================
+elif source.startswith("🌍"):
+    from surface_fuels import portable
+    st.subheader("🌍 Generate the 3D surface-fuel product anywhere")
+    st.markdown(
+        "Pick **any location on Earth** → fetch AlphaEarth + Sentinel-1 for that AOI → run the "
+        "**portable model** (trained on US 3DEP; predictors are global & free) → 30 m → 1 m structure. "
+        "No local LiDAR needed. First run for a spot downloads data (~1–2 min), then it's **cached**.")
+    if portable.load() is None:
+        st.warning("Portable model not built yet — run `python scripts/train_portable.py`.")
+        st.stop()
+
+    PRESETS = {
+        "OSBS savanna (FL, US)": (29.69, -81.99), "SOAP conifer (CA, US)": (37.03, -119.26),
+        "Yosemite (CA, US)": (37.75, -119.59), "Konza prairie (KS, US)": (39.10, -96.56),
+        "Amazon rainforest (BR)": (-3.10, -60.02), "Custom…": None,
+    }
+    with st.sidebar:
+        st.header("Location")
+        preset = st.selectbox("Preset", list(PRESETS), index=0)
+        if PRESETS[preset] is not None:
+            lat, lon = PRESETS[preset]
+            st.write(f"📍 {lat:.4f}, {lon:.4f}")
+        else:
+            lat = st.number_input("Latitude", -60.0, 70.0, 29.69, format="%.4f")
+            lon = st.number_input("Longitude", -180.0, 180.0, -81.99, format="%.4f")
+        size = st.slider("AOI size (m)", 400, 1500, 1200, step=100,
+                         help="Capped at 1500 m so generation stays within memory (no OOM).")
+        year = st.select_slider("AlphaEarth year", options=list(range(2017, 2025)), value=2022)
+        est = portable.aoi_memory_estimate(float(size))
+        st.caption(f"🧠 {est['n10']}×{est['n10']} @10 m · ~{est['predict_mb']:.0f} MB to generate · "
+                   f"1 m export ~{est['export_1m_mb']:.0f} MB")
+        go_btn = st.button("Generate ▶", type="primary")
+
+    if go_btn:
+        try:
+            with st.spinner(f"Fetching AlphaEarth {year} + Sentinel-1 for ({lat:.3f}, {lon:.3f})…"):
+                st.session_state["aoi"] = portable.predict_aoi(lat, lon, float(size), int(year))
+        except Exception as e:
+            st.error(f"Could not generate: {e}")
+    out = st.session_state.get("aoi")
+    if out is None:
+        st.info("Set a location in the sidebar and click **Generate ▶**.")
+        st.stop()
+
+    pred, ood = out["pred10"], out["ood"]
+    thr, frac_ood = float(out["ood_thresh"]), float(out["frac_ood"])
+    if frac_ood > 0.5:
+        st.error(f"⚠️ {frac_ood*100:.0f}% of this AOI is **out-of-distribution** (unlike the US training "
+                 "ecosystems — SE savanna + Sierra conifer). Treat as exploratory extrapolation, *not* a "
+                 "validated product. This is the honest limit of a US-trained model applied globally.")
+    elif frac_ood > 0.15:
+        st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution — interpret with care.")
+    else:
+        st.success("In-distribution: this AOI resembles the training ecosystems.")
+    st.caption(f"{'⚡ cached' if out.get('cached') else '🛰️ freshly generated'} · AlphaEarth {out['year']} · "
+               f"{'with' if out.get('has_s1') else 'no'} Sentinel-1 · EPSG:{int(out['epsg'])} · "
+               "*predicted* surface structure — no local truth here, so read the uncertainty + OOD maps.")
+
+    st.plotly_chart(voxel_figure(portable.display_grid(pred, out["res"]), threshold, opacity,
+                                 f"Predicted 3D structure @ ({lat:.3f}, {lon:.3f})"), use_container_width=True)
+
+    width = out["upper"] - out["lower"]
+    st.plotly_chart(synced_heatmaps([
+        {"title": "Predicted structure (kg/m²)", "z": pred, "cmin": 0,
+         "cmax": float(np.percentile(pred, 98) + 1e-6), "colorscale": COLORSCALE, "cbar": True, "cbar_title": "kg/m²"},
+        {"title": "Uncertainty (90% interval width)", "z": width, "cmin": 0,
+         "cmax": float(np.percentile(width, 98) + 1e-6), "colorscale": "Purples", "cbar": True, "cbar_title": "kg/m²"},
+        {"title": "OOD score (dist. to training)", "z": ood, "cmin": 0,
+         "cmax": float(max(thr * 2, np.percentile(ood, 98))), "colorscale": "Inferno", "cbar": True, "cbar_title": "dist"},
+    ]), use_container_width=True)
+    st.caption(f"OOD threshold ≈ {thr:.1f} (95th pct of training). Cells above it are unlike anything the "
+               "model was trained on. Zoom any panel — all move together.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Mean structure (kg/m²)", f"{pred.mean():.2f}")
+    c2.metric("Heterogeneity (CV)", f"{pred.std()/(pred.mean()+1e-9):.2f}")
+    c3.metric("Mean uncertainty (kg/m²)", f"{width.mean():.2f}")
+    c4.metric("% out-of-distribution", f"{frac_ood*100:.0f}%")
+    st.caption("Resolution is AlphaEarth-native 10 m (the 3D view disaggregates over a near-ground vertical "
+               "profile). Use the button to export a 1 m³ FastFuels Option-C NetCDF.")
+    est = portable.aoi_memory_estimate(float(out["size"]))
+    if not est["export_1m_ok"]:
+        st.caption(f"1 m export disabled for this AOI (~{est['export_1m_mb']:.0f} MB > cap).")
+    elif st.button(f"Build 1 m³ NetCDF (Option C) · ~{est['export_1m_mb']:.0f} MB"):
+        p = os.path.join(PROC, "generated_aoi_1m.nc")
+        portable.to_netcdf_1m(out, p)
+        with open(p, "rb") as f:
+            st.download_button("⬇ download generated_aoi_1m.nc", f, file_name="generated_aoi_1m.nc")
 
 # ===================== SYNTHETIC MODE =====================
 elif source.startswith("Synthetic"):

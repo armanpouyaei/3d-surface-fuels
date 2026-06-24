@@ -35,3 +35,4 @@ torch                  # CNN head-to-head (deconto_headtohead.py). On Apple Sili
 # geopandas            # layerset GeoJSON (FastFuels Option D)
 # claymodel            # Stage-2 UNet downscaler (Clay/AlphaEarth embeddings)
 # fastfuels-sdk        # FastFuels v2 API client (head-to-head + ingestion)
+joblib  # portable model persistence
