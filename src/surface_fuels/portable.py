@@ -91,6 +91,56 @@ def utm_epsg(lon: float, lat: float) -> int:
     return (32600 if lat >= 0 else 32700) + zone
 
 
+# ── canonical global grid of L-metre square tiles (UTM-snapped) ───────────────
+# A click snaps to its containing tile so the AOI is canonical and deterministic —
+# the same tile always yields the same cache key (reusable, shareable downloads).
+def snap_to_grid(lat: float, lon: float, L: float) -> Dict:
+    """Snap (lat,lon) to the L-metre UTM tile that contains it. Returns the tile's
+    center lat/lon (the deterministic AOI center), UTM epsg, origin, and integer id."""
+    from pyproj import Transformer
+    epsg = utm_epsg(lon, lat)
+    fwd = Transformer.from_crs(4326, epsg, always_xy=True)
+    inv = Transformer.from_crs(epsg, 4326, always_xy=True)
+    e, n = fwd.transform(lon, lat)
+    i, j = int(np.floor(e / L)), int(np.floor(n / L))
+    x0, y0 = i * L, j * L
+    clon, clat = inv.transform(x0 + L / 2.0, y0 + L / 2.0)
+    cr = [inv.transform(x0, y0), inv.transform(x0 + L, y0), inv.transform(x0 + L, y0 + L), inv.transform(x0, y0 + L)]
+    las = [c[1] for c in cr]; los = [c[0] for c in cr]
+    return {"lat": clat, "lon": clon, "epsg": epsg, "x0": x0, "y0": y0, "i": i, "j": j, "L": L,
+            "bounds": [[min(las), min(los)], [max(las), max(los)]]}
+
+
+def viewport_grid(bounds: Dict, L: float, max_cells: int = 400):
+    """L-metre UTM grid cells overlapping a Leaflet ``bounds`` dict. Returns a list of
+    {bounds:[[s,w],[n,e]], i, j} for folium rectangles, or None if too many (zoom out)."""
+    if not bounds or "_southWest" not in bounds:
+        return None
+    from pyproj import Transformer
+    sw, ne = bounds["_southWest"], bounds["_northEast"]
+    clat, clon = (sw["lat"] + ne["lat"]) / 2.0, (sw["lng"] + ne["lng"]) / 2.0
+    epsg = utm_epsg(clon, clat)
+    fwd = Transformer.from_crs(4326, epsg, always_xy=True)
+    inv = Transformer.from_crs(epsg, 4326, always_xy=True)
+    xs, ys = [], []
+    for la in (sw["lat"], ne["lat"]):
+        for lo in (sw["lng"], ne["lng"]):
+            x, y = fwd.transform(lo, la); xs.append(x); ys.append(y)
+    i0, i1 = int(np.floor(min(xs) / L)), int(np.floor(max(xs) / L))
+    j0, j1 = int(np.floor(min(ys) / L)), int(np.floor(max(ys) / L))
+    if (i1 - i0 + 1) * (j1 - j0 + 1) > max_cells:
+        return None
+    cells = []
+    for i in range(i0, i1 + 1):
+        for j in range(j0, j1 + 1):
+            x0, y0 = i * L, j * L
+            cr = [inv.transform(x0, y0), inv.transform(x0 + L, y0),
+                  inv.transform(x0 + L, y0 + L), inv.transform(x0, y0 + L)]
+            las = [c[1] for c in cr]; los = [c[0] for c in cr]
+            cells.append({"i": i, "j": j, "bounds": [[min(las), min(los)], [max(las), max(los)]]})
+    return cells
+
+
 def _aoi_grid(lat, lon, size, res) -> Tuple[FuelVoxelGrid, int]:
     from pyproj import Transformer
     epsg = utm_epsg(lon, lat)

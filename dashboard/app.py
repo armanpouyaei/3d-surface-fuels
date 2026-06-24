@@ -610,9 +610,10 @@ elif source.startswith("🌍"):
     ESRI_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     st.subheader("🌍 Generate the 3D surface-fuel product anywhere")
     st.markdown(
-        "**Click the satellite map to drop the AOI square; use the size slider to resize it** → fetch "
-        "AlphaEarth + Sentinel-1 for it → run the **portable model** (trained on US 3DEP; predictors global "
-        "& free) → 30 m → 1 m structure. No local LiDAR. First run downloads data (~1–2 min), then **cached**.")
+        "**Zoom in and click a grid tile** to select an AOI → fetch AlphaEarth + Sentinel-1 for it → run "
+        "the **portable model** (trained on US 3DEP; predictors global & free) → 30 m → 1 m structure. The "
+        "grid is a **fixed global tiling** (UTM-snapped), so each tile is canonical — its result is **cached "
+        "and reusable**. First run downloads data (~1–2 min); after that the tile is ⚡ instant.")
     if portable.load() is None:
         st.warning("Portable model not built yet — run `python scripts/train_portable.py`.")
         st.stop()
@@ -630,31 +631,43 @@ elif source.startswith("🌍"):
         clat, clon, pyear = PRESETS[preset]
         year = st.select_slider("AlphaEarth year", options=list(range(2017, 2025)), value=pyear,
                                 help="Training vintages: OSBS 2018, SOAP 2022. Off-vintage years read as OOD.")
-        size = st.slider("AOI square size (m)", 400, int(portable.MAX_AOI_M), 1000, step=100,
-                         help="Side of the square AOI. Click the map to place it; capped for memory safety.")
+        size = st.slider("AOI tile size (m)", 400, int(portable.MAX_AOI_M), 1000, step=100,
+                         help="Side of each canonical grid tile. Defines the fixed global tiling + cache.")
+        ZMIN = 13
 
-    # center = last clicked point (per-preset state) else the preset center; click moves the square
-    mapkey = "aoi_map_%d" % list(PRESETS).index(preset)
-    pc = (st.session_state.get(mapkey) or {}).get("last_clicked")
-    lat, lon = (pc["lat"], pc["lng"]) if pc else (clat, clon)
-    dlat = size / 111320.0 / 2.0
-    dlon = size / (111320.0 * max(math.cos(math.radians(lat)), 1e-3)) / 2.0
-    fmap = folium.Map(location=[lat, lon], zoom_start=15, tiles=None, control_scale=True)
+    # state from the previous run of this (preset, size) map
+    mapkey = "aoi_map_%d_%d" % (list(PRESETS).index(preset), int(size))
+    prev = st.session_state.get(mapkey) or {}
+    pc, bounds, zoom = prev.get("last_clicked"), prev.get("bounds"), prev.get("zoom")
+    # selected tile = the click snapped to the canonical L-grid (else the preset's tile)
+    sel = portable.snap_to_grid(pc["lat"], pc["lng"], float(size)) if pc \
+        else portable.snap_to_grid(clat, clon, float(size))
+
+    fmap = folium.Map(location=[sel["lat"], sel["lon"]], zoom_start=14, tiles=None, control_scale=True)
     folium.TileLayer(ESRI_TILES, attr="Esri World Imagery", name="Satellite").add_to(fmap)
-    folium.Rectangle(bounds=[[lat - dlat, lon - dlon], [lat + dlat, lon + dlon]], color="#ffec3d",
-                     weight=2, fill=True, fill_opacity=0.12, tooltip=f"AOI {size:.0f} m square").add_to(fmap)
-    folium.CircleMarker([lat, lon], radius=4, color="#ffec3d", fill=True, fill_opacity=1,
-                        tooltip="AOI center — click elsewhere to move").add_to(fmap)
+    cells = portable.viewport_grid(bounds, float(size)) if (bounds and (zoom or 0) >= ZMIN) else None
+    if cells is not None:
+        for c in cells:
+            folium.Rectangle(c["bounds"], color="#ffffff", weight=1, opacity=0.45, fill=False).add_to(fmap)
+        grid_msg = f"🔲 {len(cells)} tiles in view — click one."
+    elif (zoom or 0) < ZMIN and zoom:
+        grid_msg = "🔍 zoom in to reveal the AOI grid, then click a tile."
+    else:
+        grid_msg = "🔍 zoom in further to reveal the AOI grid."
+    folium.Rectangle(sel["bounds"], color="#ffec3d", weight=3, fill=True, fill_opacity=0.18,
+                     tooltip=f"selected tile {sel['i']},{sel['j']} · {size:.0f} m").add_to(fmap)
+    folium.CircleMarker([sel["lat"], sel["lon"]], radius=4, color="#ffec3d", fill=True, fill_opacity=1).add_to(fmap)
     map_state = st_folium(fmap, height=440, use_container_width=True,
-                          returned_objects=["last_clicked"], key=mapkey)
+                          returned_objects=["last_clicked", "bounds", "zoom"], key=mapkey)
     nc = (map_state or {}).get("last_clicked")
-    if nc:
-        lat, lon = nc["lat"], nc["lng"]   # newest click this run
+    if nc:                                            # newest click this run -> re-snap
+        sel = portable.snap_to_grid(nc["lat"], nc["lng"], float(size))
+    lat, lon = sel["lat"], sel["lon"]
 
     est = portable.aoi_memory_estimate(float(size))
     c_sel, c_go = st.columns([3, 1])
-    c_sel.caption(f"⬛ AOI square: center ({lat:.4f}, {lon:.4f}) · {size:.0f} m · 🧠 {est['n10']}×{est['n10']} "
-                  f"@10 m ≈ {est['predict_mb']:.0f} MB · *click map to move, slider to resize*")
+    c_sel.caption(f"{grid_msg}  ·  ⬛ tile ({sel['i']}, {sel['j']}) EPSG:{sel['epsg']} · {size:.0f} m · "
+                  f"canonical → deterministic cache · 🧠 {est['n10']}×{est['n10']} @10 m ≈ {est['predict_mb']:.0f} MB")
     go_btn = c_go.button("Generate ▶", type="primary", use_container_width=True)
 
     if go_btn:
