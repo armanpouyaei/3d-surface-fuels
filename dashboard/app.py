@@ -684,7 +684,7 @@ elif source.startswith("🌍"):
             st.error(f"Could not generate: {e}")
     out = st.session_state.get("aoi")
     if out is None:
-        st.info("Draw a rectangle on the map (or click a point), then press **Generate ▶**.")
+        st.info("Zoom in, click a grid tile to select it, then press **Generate ▶**.")
         st.stop()
 
     pred, ood = out["pred10"], out["ood"]
