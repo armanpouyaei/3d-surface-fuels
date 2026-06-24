@@ -165,9 +165,15 @@ AlphaEarth/Clay embeddings + a UNet.
   the issue), coverage 0.90. **Honest ablation: AlphaEarth ≈ no gain over Sentinel-1 + terrain**
   (full 0.607 vs physical 0.604; AEF-only 0.15) — AEF overlaps S1 and its structure signal is
   GEDI/canopy-top, so limited understory info. The ablation is the credibility tool; don't over-rely on AEF.
-- ▶️ **Next:** (1) **NEON OSBS field plots** (`neonutilities`: herb/litter/CWD) to calibrate/validate
-  a REAL fuel target (replace the 3DEP proxy — biggest risk); (2) add **GEDI L2B PAVD** understory
-  features (token works) — the signal AEF/S1 lack; (3) larger multi-ecosystem region; (4) re-wire
-  downscaler to the 30 m output; (5) UNet. Embedding path = AlphaEarth via free S3 mirror.
+- ✅ **AEF orientation bug fixed** (`aef_for_grid` was north-up vs row 0 = south target) → **reverses**
+  the prior "AEF adds nothing": OSBS AEF-only R² 0.15→0.66, full→0.72, AEF rescues under-canopy.
+- ✅ **#1 NEON field validation** (`build_neon_field.py`): AlphaEarth predicts **real** OSBS herb load
+  **R² 0.23 / Spearman 0.51** (leave-one-plot-out), beats S1 0.07 — validated on ground fuel.
+- ✅ **#2 GEDI L2B PAVD** (`build_gedi_osbs.py`, token): real understory PAVD extracted, but **sparse**
+  (3 footprints / 1 km AOI) → a **regional** asset (sparse labels / interpolated covariate), not a per-tile feature.
+- ▶️ **Next:** (1) total surface load (add litter/CWD) + calibrate 3DEP proxy to field; (2) **larger
+  multi-ecosystem region** (GEDI usable + generality testable); (3) de-Conto-architecture-on-fuel
+  head-to-head; (4) re-wire Stage-2 downscaler to the 30 m output; (5) UNet. Embedding = AlphaEarth via free S3 mirror.
+  Figures (gitignored) saved to `figures/` by each build script.
 
 When adding real data, mirror the `FuelVoxelGrid` interface so dashboard/metrics work unchanged.

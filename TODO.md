@@ -44,11 +44,14 @@ Ordered. **Stage 1 (global 30 m product) before Stage 2 (downscaler).** See
       leave-one-plot-out — **AlphaEarth predicts field herb load R² 0.23 / Spearman 0.51**,
       beats S1 (0.07). Validated on *real ground fuel*, not a proxy. `figures/neon_field_validation.png`.
       (Caveat: herb component only, n≈20 plots, 0.2 m² clip vs 10 m pixel.)
-- [ ] **▶️ NEXT — #2 GEDI L2B PAVD** understory features (Earthdata token works): add 0-5 m /
-      5-10 m PAVD + PAI/cover; test if they lift the model (esp. under canopy). GEDI is sparse
-      over a small AOI — quantify footprint coverage first.
-- [ ] **#1b** add litter/CWD components for total surface load; calibrate the 3DEP proxy to field.
-- [ ] **Larger, multi-ecosystem region** (more tiles) so generality is testable.
+- [x] **#2 GEDI L2B PAVD** (`build_gedi_osbs.py`, token works): extracted real understory PAVD
+      (0-5 m / 5-10 m) + PAI/cover over OSBS. **Finding: too sparse for a dense 30 m predictor** —
+      ~395 footprints/pass over the ~11 km box but only **3 in the 1 km AOI**. → use GEDI at
+      REGIONAL scale (sparse training labels / interpolated covariate over many passes), not per-tile.
+      The understory PAVD signal AEF/S1 lack is real; `figures/gedi_osbs.png`.
+- [ ] **▶️ NEXT:** (a) **#1b** add litter/CWD for *total* surface load + calibrate the 3DEP proxy
+      to field; (b) **larger multi-ecosystem region** (where GEDI becomes usable + generality is
+      testable); (c) de-Conto-architecture-on-fuel head-to-head; (d) re-wire Stage-2 downscaler to the 30 m output.
 - [ ] **⚠️ DO FIRST — define + pre-validate the 3DEP→surface-fuel-load equation** against FIA/NEON
       (1 m fuel proxy: fuelbed depth + sub-canopy return density → kg/m²). *Everything downstream
       depends on this; if it's weak (~R² 0.3–0.4) re-scope the variable.*
