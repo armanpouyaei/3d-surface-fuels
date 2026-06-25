@@ -164,6 +164,30 @@ the in-scope **surface** layer is the one FastFuels renders flat and we make 3D.
 (The `grids/surface` LANDFIRE-FBFM40 step failed server-side at run time, so the
 combined surface+tree export wasn't available; the tree grid is the canopy shown.)
 
+## 2e. Model v2 — domain adaptation for cross-ecosystem generalization
+
+v1's cross-ecosystem failure was diagnosed (LOSO): it predicted the right spatial *pattern*
+(Spearman +0.17) but the wrong absolute *scale* (R² −0.62). Fix = **standardize AlphaEarth
+per-tile before prediction** (domain adaptation removes the per-ecosystem offset/scale).
+Benchmarked leave-one-site-out (`scripts/portable_v2_experiments.py`):
+
+| treatment | LOSO mean R² | LOSO mean Spearman | OSBS Spearman |
+|---|---|---|---|
+| v1 (raw AEF+S1) | −0.62 | +0.17 | −0.36 |
+| **v2 (per-tile standardized = domain-adapt)** | **+0.01** | **+0.30** | **+0.18** |
+| spatial CNN (7×7 patches, tile-std) | −0.55 | +0.20 | +0.54 |
+
+- **v2 generalizes far better** to unseen ecosystems and is **sharper** (OSBS prediction CV
+  0.12 → 0.27). OOD is kept on **raw** features, so domain shift is still flagged (Amazon
+  100%, Germany 95% OOD) even though prediction uses domain-adapted features.
+- **A spatial CNN did NOT beat v2** overall (mean R² −0.55, Spearman +0.20): it wins at
+  OSBS/WREF but overfits at HARV/SRER/CPER — learned texture doesn't transfer cross-ecosystem
+  (same data-starved lesson as the de Conto head-to-head). **Domain adaptation, not
+  architecture, is the generalization lever.**
+- **Clay encoder deferred:** `claymodel` 1.5 needs Python ≥3.11 (env is 3.9) + pins torch 2.4,
+  and overlaps AlphaEarth — a separate-env follow-up.
+- v1 retained (`stage1_portable_v1.joblib`); dashboard has a **v1/v2 selector** (v2 default).
+
 ## 2d. Global "generate anywhere" — on-demand inference (`portable.py`, dashboard tab)
 
 A **portable Stage-1 model** (`scripts/train_portable.py` → `stage1_portable.joblib`)
