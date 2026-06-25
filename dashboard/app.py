@@ -635,21 +635,36 @@ elif source.startswith("🌍"):
                          help="Side of each canonical grid tile. Defines the fixed global tiling + cache.")
         ZMIN = 13
 
-    # Robust st_folium state machine: keep view + selection in session_state, and drive
-    # st_folium's OWN center/zoom params (so redrawing the grid/highlight never snaps the
-    # view back), and persist the selected tile (st_folium clears last_clicked on re-render).
+    # Robust st_folium handling. KEY INSIGHT: never pass center/zoom to st_folium (those
+    # imperatively force the *stale* view every rerun → snap-back). Instead read st_folium's
+    # OWN stored output (st.session_state["ga_map"], which holds the post-interaction view +
+    # click) and feed that view into folium.Map's zoom_start/location — so a re-render shows
+    # exactly where the user left it. Selection is persisted in session_state so it survives
+    # st_folium clearing last_clicked on re-render.
     ss = st.session_state
     idx = list(PRESETS).index(preset)
-    if ss.get("ga_preset") != idx:                    # preset change → reset view + selection
+    if ss.get("ga_preset") != idx:                    # preset change → reset map view + selection
         ss.ga_preset = idx
-        ss.ga_center = [clat, clon]; ss.ga_zoom = 14; ss.ga_bounds = None
+        ss.pop("ga_map", None)                        # reset st_folium's stored view
         ss.ga_sel = portable.snap_to_grid(clat, clon, float(size)); ss.ga_click = None
+
+    prev = ss.get("ga_map") or {}                     # st_folium's last return (post-interaction)
+    lc = prev.get("last_clicked")
+    if lc and lc != ss.get("ga_click"):               # a NEW click → move the selection
+        ss.ga_click = lc
+        ss.ga_sel = portable.snap_to_grid(lc["lat"], lc["lng"], float(size))
+    if "ga_sel" not in ss:
+        ss.ga_sel = portable.snap_to_grid(clat, clon, float(size))
     sel = portable.snap_to_grid(ss.ga_sel["lat"], ss.ga_sel["lon"], float(size))  # re-snap to current size
     ss.ga_sel = sel
 
-    fmap = folium.Map(location=ss.ga_center, zoom_start=ss.ga_zoom, tiles=None, control_scale=True)
+    # view = st_folium's last reported view (so re-renders don't snap back); else preset
+    z = int(prev.get("zoom") or 14)
+    ctr = prev.get("center")
+    loc = [ctr["lat"], ctr["lng"]] if ctr else [clat, clon]
+    fmap = folium.Map(location=loc, zoom_start=z, tiles=None, control_scale=True)
     folium.TileLayer(ESRI_TILES, attr="Esri World Imagery", name="Satellite").add_to(fmap)
-    cells = portable.viewport_grid(ss.ga_bounds, float(size)) if (ss.ga_bounds and ss.ga_zoom >= ZMIN) else None
+    cells = portable.viewport_grid(prev.get("bounds"), float(size)) if (prev.get("bounds") and z >= ZMIN) else None
     if cells is not None:
         for c in cells:
             folium.Rectangle(c["bounds"], color="#ffffff", weight=1, opacity=0.45, fill=False).add_to(fmap)
@@ -659,22 +674,9 @@ elif source.startswith("🌍"):
     folium.Rectangle(sel["bounds"], color="#ffec3d", weight=3, fill=True, fill_opacity=0.20,
                      tooltip=f"selected tile {sel['i']},{sel['j']} · {size:.0f} m").add_to(fmap)
     folium.CircleMarker([sel["lat"], sel["lon"]], radius=4, color="#ffec3d", fill=True, fill_opacity=1).add_to(fmap)
-    # center/zoom passed to st_folium control the view on re-render (no snap-back)
-    map_state = st_folium(fmap, height=440, use_container_width=True, center=ss.ga_center,
-                          zoom=ss.ga_zoom, returned_objects=["last_clicked", "bounds", "zoom", "center"],
-                          key="ga_map")
-    # sync view state (no rerun — grid updates on the next natural interaction)
-    if (map_state or {}).get("center"):
-        ss.ga_center = [map_state["center"]["lat"], map_state["center"]["lng"]]
-    if (map_state or {}).get("zoom") is not None:
-        ss.ga_zoom = map_state["zoom"]
-    if (map_state or {}).get("bounds"):
-        ss.ga_bounds = map_state["bounds"]
-    lc = (map_state or {}).get("last_clicked")
-    if lc and lc != ss.ga_click:                      # NEW click → move selection + redraw once
-        ss.ga_click = lc
-        ss.ga_sel = portable.snap_to_grid(lc["lat"], lc["lng"], float(size))
-        st.rerun()
+    # NO center/zoom args — let st_folium keep the user's view; we read it back via key next run
+    st_folium(fmap, height=440, use_container_width=True,
+              returned_objects=["last_clicked", "bounds", "zoom", "center"], key="ga_map")
     lat, lon = sel["lat"], sel["lon"]
 
     est = portable.aoi_memory_estimate(float(size))
