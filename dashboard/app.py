@@ -115,6 +115,14 @@ def load_aoi_basemap(west, south, east, north, epsg, px=512):
 
 
 @st.cache_data(show_spinner=False)
+def load_ff_surface(x0, y0, res, ny, nx, epsg, lat, lon):
+    """FastFuels surface load (LANDFIRE FBFM40 → SB40) over the AOI, cached. None outside US."""
+    from surface_fuels import portable
+    out = {"pred10": np.zeros((ny, nx), np.float32), "x0": x0, "y0": y0, "res": res, "epsg": epsg}
+    return portable.fastfuels_surface_aoi(out, lat, lon)
+
+
+@st.cache_data(show_spinner=False)
 def load_deconto():
     """de Conto head-to-head arrays (scripts/deconto_headtohead.py)."""
     p = os.path.join(PROC, "deconto_headtohead.npz")
@@ -280,11 +288,11 @@ def synced_heatmaps(panels):
     return fig
 
 
-def rgb_vs_structure(rgb, pred, vmax):
-    """Real Esri satellite RGB next to the predicted structure, rendered at the SAME
-    size. Both arrays are resampled to the same (ny,nx) grid and drawn as go.Image with
-    an identical square aspect, so the two panels match exactly. ``rgb`` row 0 = north;
-    ``pred`` row 0 = south → flip pred to north-up to align with the satellite."""
+def rgb_vs_structure(rgb, pred, vmax, ff=None):
+    """Equal-size panels: real Esri satellite · our predicted structure · (optional)
+    FastFuels surface load. All arrays are drawn as go.Image on the SAME (ny,nx) grid so
+    every panel is identical size. ``pred`` is row 0 = south (flip to north-up); ``rgb``
+    and ``ff`` (LANDFIRE exportImage) are already north-up."""
     import matplotlib
     try:
         cmap = matplotlib.colormaps["YlOrRd"]
@@ -292,22 +300,24 @@ def rgb_vs_structure(rgb, pred, vmax):
         import matplotlib.cm as _cm
         cmap = _cm.get_cmap("YlOrRd")
     ny, nx = pred.shape
-    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.06,
-                        subplot_titles=["🛰️ Esri satellite (real)", "Predicted surface structure"])
+
+    def colorize(arr, vmx, flip):
+        a = np.flipud(arr) if flip else arr
+        return (cmap(np.clip(a / (vmx + 1e-9), 0, 1))[:, :, :3] * 255).astype(np.uint8)
+
     rgb_img = _resample_rgb(rgb, ny, nx) if rgb is not None else np.full((ny, nx, 3), 230, np.uint8)
-    fig.add_trace(go.Image(z=rgb_img), row=1, col=1)
-    # colormap the structure to an RGB image on the SAME grid (north-up) so both panels match
-    norm = np.clip(np.flipud(pred) / (vmax + 1e-9), 0, 1)
-    srgb = (cmap(norm)[:, :, :3] * 255).astype(np.uint8)
-    fig.add_trace(go.Image(z=srgb), row=1, col=2)
-    # colorbar for the structure scale, without affecting the image axes
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", hoverinfo="skip", showlegend=False,
-                             marker=dict(colorscale=COLORSCALE, cmin=0, cmax=vmax, color=[0],
-                                         showscale=True, colorbar=dict(title="kg/m²", thickness=12,
-                                                                       len=0.85, x=1.005))), row=1, col=2)
+    panels = [("🛰️ Esri satellite (real)", rgb_img),
+              (f"Our structure · 0–{vmax:.2f} kg/m²", colorize(pred, vmax, True))]
+    if ff is not None:
+        ffmax = float(np.percentile(ff[ff > 0], 98)) if (ff > 0).any() else 1.0
+        panels.append((f"FastFuels surface · 0–{ffmax:.1f} kg/m²", colorize(ff, ffmax, False)))
+    fig = make_subplots(rows=1, cols=len(panels), horizontal_spacing=0.03,
+                        subplot_titles=[p[0] for p in panels])
+    for i, (_, img) in enumerate(panels, start=1):
+        fig.add_trace(go.Image(z=img), row=1, col=i)
     fig.update_xaxes(showticklabels=False)
     fig.update_yaxes(showticklabels=False)
-    fig.update_layout(height=440, margin=dict(l=0, r=0, t=30, b=0))
+    fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0))
     return fig
 
 
@@ -726,16 +736,27 @@ elif source.startswith("🌍"):
                f"{'with' if out.get('has_s1') else 'no'} Sentinel-1 · EPSG:{int(out['epsg'])} · "
                "*predicted* surface structure — no local truth here, so read the uncertainty + OOD maps.")
 
-    # satellite RGB next to the predicted structure (the visual sanity check)
+    # satellite RGB · our structure · FastFuels surface (the "are we adding value?" check)
     ny0, nx0 = pred.shape
     west, south = float(out["x0"]), float(out["y0"])
     east, north = west + nx0 * out["res"], south + ny0 * out["res"]
-    with st.spinner("Fetching Esri satellite imagery for the AOI…"):
+    with st.spinner("Fetching Esri satellite + FastFuels (LANDFIRE) for the AOI…"):
         rgb = load_aoi_basemap(west, south, east, north, int(out["epsg"]))
-    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6)),
+        ff = load_ff_surface(west, south, float(out["res"]), ny0, nx0, int(out["epsg"]), float(lat), float(lon))
+    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6), ff),
                     use_container_width=True)
-    st.caption("Left: real Esri World Imagery for the exact AOI footprint. Right: model-predicted surface "
-               "structure — eyeball the correspondence (denser vegetation ↔ higher predicted structure).")
+    ours_cv = float(pred.std() / (pred.mean() + 1e-9))
+    if ff is not None:
+        ff_cv = float(ff.std() / (ff.mean() + 1e-9))
+        st.caption(f"Satellite · **our structure (CV {ours_cv:.2f})** · **FastFuels surface (CV {ff_cv:.2f})**. "
+                   "FastFuels is LANDFIRE FBFM40 → SB40 load — *uniform per 30 m fuel-model class* (blocky, low CV). "
+                   "Where ours shows fine sub-30 m detail the satellite supports and FastFuels can't, we're adding "
+                   "value. (Different quantities — our near-ground structure vs FastFuels total load — so compare "
+                   "the *spatial pattern*, not absolute values.)")
+    else:
+        st.caption(f"Satellite · our predicted structure (CV {ours_cv:.2f}). **FastFuels comparison unavailable "
+                   "here** — its surface layer is LANDFIRE FBFM40, which is **US-only**. Pick a US location to "
+                   "see the head-to-head.")
 
     st.plotly_chart(voxel_figure(portable.display_grid(pred, out["res"]), threshold, opacity,
                                  f"Predicted 3D structure @ ({lat:.3f}, {lon:.3f})"), use_container_width=True)

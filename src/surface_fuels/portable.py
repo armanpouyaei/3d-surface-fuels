@@ -91,6 +91,72 @@ def utm_epsg(lon: float, lat: float) -> int:
     return (32600 if lat >= 0 else 32700) + zone
 
 
+# ── FastFuels' surface layer = LANDFIRE FBFM40 → Scott & Burgan SB40 load lookup ──
+# Total surface fuel load (tons/acre, summed over 1h+10h+100h+live-herb+live-woody),
+# from RMRS-GTR-153 Table 7. FBFM40 raster codes: GR1-9=101-109, GS1-4=121-124,
+# SH1-9=141-149, TU1-5=161-165, TL1-9=181-189; 91-99 = non-burnable (load 0).
+_TON_ACRE_KG_M2 = 0.224170
+_SB40_TONS = {
+    "GR1": 0.40, "GR2": 1.10, "GR3": 2.00, "GR4": 2.15, "GR5": 2.90, "GR6": 3.50,
+    "GR7": 6.40, "GR8": 8.80, "GR9": 11.00, "GS1": 1.35, "GS2": 2.60, "GS3": 3.25, "GS4": 12.80,
+    "SH1": 1.95, "SH2": 8.35, "SH3": 9.65, "SH4": 4.75, "SH5": 8.60, "SH6": 5.75, "SH7": 14.40,
+    "SH8": 10.65, "SH9": 15.50, "TU1": 3.70, "TU2": 4.20, "TU3": 3.25, "TU4": 6.50, "TU5": 14.00,
+    "TL1": 6.80, "TL2": 5.90, "TL3": 5.50, "TL4": 6.20, "TL5": 8.05, "TL6": 4.80, "TL7": 9.80,
+    "TL8": 8.30, "TL9": 14.10,
+}
+_PREFIX_BASE = {"GR": 100, "GS": 120, "SH": 140, "TU": 160, "TL": 180}
+FBFM40_LOAD = {}  # numeric FBFM40 code -> total surface load (kg/m²)
+for _name, _t in _SB40_TONS.items():
+    FBFM40_LOAD[_PREFIX_BASE[_name[:2]] + int(_name[2:])] = round(_t * _TON_ACRE_KG_M2, 4)
+
+# LANDFIRE FBFM40 ImageServer per US region (free, no key) — for FastFuels' surface layer.
+_LF_SERVICE = {"CONUS": "Landfire_LF2024/LF2024_FBFM40_CONUS", "AK": "Landfire_LF2024/LF2024_FBFM40_AK",
+               "HI": "Landfire_LF2024/LF2024_FBFM40_HI", "PRVI": "Landfire_LF2024/LF2024_FBFM40_PRVI"}
+
+
+def _lf_region(lon, lat):
+    if -125 <= lon <= -66 and 24 <= lat <= 50:
+        return "CONUS"
+    if -179 <= lon <= -129 and 51 <= lat <= 72:
+        return "AK"
+    if -161 <= lon <= -154 and 18 <= lat <= 23:
+        return "HI"
+    if -68 <= lon <= -64 and 17 <= lat <= 19:
+        return "PRVI"
+    return None
+
+
+def fastfuels_surface_aoi(out: Dict, lat: float, lon: float):
+    """FastFuels' surface fuel LOAD (kg/m²) over the AOI: LANDFIRE FBFM40 → SB40 lookup,
+    aligned to our prediction grid (north-up). Returns None outside US / on failure.
+    Uniform per 30 m fuel-model class — the baseline our heterogeneous product improves on."""
+    region = _lf_region(lon, lat)
+    if region is None:
+        return None
+    try:
+        import io
+        import requests
+        import rasterio
+        ny, nx = out["pred10"].shape
+        x0, y0, res, epsg = float(out["x0"]), float(out["y0"]), float(out["res"]), int(out["epsg"])
+        url = f"https://lfps.usgs.gov/arcgis/rest/services/{_LF_SERVICE[region]}/ImageServer/exportImage"
+        r = requests.get(url, timeout=60, headers={"User-Agent": "Mozilla/5.0"}, params={
+            "bbox": f"{x0},{y0},{x0 + nx * res},{y0 + ny * res}", "bboxSR": epsg, "imageSR": epsg,
+            "size": f"{nx},{ny}", "format": "tiff", "pixelType": "U16",
+            "interpolation": "RSP_NearestNeighbor", "f": "image"})
+        if r.status_code != 200 or "tiff" not in r.headers.get("content-type", ""):
+            return None
+        with rasterio.open(io.BytesIO(r.content)) as s:
+            codes = s.read(1)                       # north-up (ArcGIS exportImage)
+        load = np.zeros(codes.shape, np.float32)    # non-burnable / unmapped -> 0
+        for code in np.unique(codes):
+            if int(code) in FBFM40_LOAD:
+                load[codes == code] = FBFM40_LOAD[int(code)]
+        return load
+    except Exception:
+        return None
+
+
 # ── canonical global grid of L-metre square tiles (UTM-snapped) ───────────────
 # A click snaps to its containing tile so the AOI is canonical and deterministic —
 # the same tile always yields the same cache key (reusable, shareable downloads).
