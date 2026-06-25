@@ -328,6 +328,33 @@ Aggregate WITHIN R² is meaningless for near-uniform sites (shortgrass cper has 
 3. **Near-uniform biomes (grass/desert):** little within-structure exists to predict; the model
    correctly returns a near-uniform low value (and the between-biome level is right).
 
+## 2g. v3 vs FastFuels — within a SEEN ecosystem (the thesis, re-checked on occupancy)
+
+The §1 thesis (measured structure beats FastFuels' uniform surface layer) re-validated on the v3
+**occupancy** target, spatially-blocked CV, against the **real** FastFuels baseline = uniform per
+LANDFIRE FBFM40 fuel-model class (`scripts/validate_v3_vs_fastfuels.py`,
+`scripts/fastfuels_class_baseline.py`):
+
+| seen site | within-block R² FastFuels-per-class | within-block R² **v3** | CV FastFuels / **v3** / truth |
+|---|---|---|---|
+| osbs | −0.28 | **+0.05** | 0.53 / **0.66** / 0.77 |
+| harv | −0.03 | **+0.03** | 0.16 / **0.24** / 0.39 |
+| soap | +0.00 | **+0.05** | 0.02 / **0.06** / 0.09 |
+| wref | −0.00 | −0.01 | 0.02 / **0.15** / 0.25 |
+| fr | (no LANDFIRE) | **+0.13** | — / **0.21** / 0.26 |
+
+- **FastFuels-per-class flattens sub-class structure**: within-block R² ≤ 0 at every site and CV ≪
+  truth (wref 0.02 vs truth 0.25). It captures *between*-class variation (osbs class-R² 0.48 with 16
+  classes) but is uniform below the class.
+- **v3 recovers the within-class heterogeneity** FastFuels cannot: higher within-block R² at every
+  site and CV much closer to truth (wref 0.15 vs 0.02; harv 0.24 vs 0.16). Overall occupancy R²
+  0.19–0.76 (blocked CV).
+- Honest note: occupancy is a *smoother* field than load, so the within-block margin (mean +0.05) is
+  narrower than the §1 load result (within-block 0.27). The two targets serve different claims:
+  **load** is the sharper FastFuels-beating demo within a site; **occupancy** is the target that
+  generalizes the *level* across biomes (§2f). v3 wins the within-seen comparison on both within-block
+  R² and CV at every site.
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only
