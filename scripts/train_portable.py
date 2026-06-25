@@ -67,7 +67,14 @@ def site_samples(s):
     X = np.stack(cols, 1).astype(np.float32)
     y = target.ravel()
     keep = (tot.ravel() > 0)
-    print(f"  [{s['name']}] {keep.sum()} samples @10 m", flush=True)
+    # cache the 2D grids so v2 (CNN patches) + re-analysis don't need to re-fetch
+    s1arr = (np.stack([np.nan_to_num(s1["vh_vv"]), np.nan_to_num(s1["rvi"])]).astype(np.float32)
+             if s1 is not None else np.zeros((2, ny, nx), np.float32))
+    os.makedirs(os.path.join(ROOT, "data", "interim"), exist_ok=True)
+    np.savez_compressed(os.path.join(ROOT, "data", "interim", f"portable_grid_{s['name']}.npz"),
+                        target=target, aef=np.nan_to_num(aef).astype(np.float32), s1=s1arr,
+                        valid=(tot > 0), x0=x0, y0=y0, epsg=s["tgt"], res=RES, year=s["year"])
+    print(f"  [{s['name']}] {keep.sum()} samples @10 m (grid cached)", flush=True)
     return X[keep], y[keep]
 
 
@@ -80,9 +87,11 @@ def main():
     if not data:
         sys.exit("No training data built.")
 
-    # leave-one-site-out generality
+    # leave-one-site-out generality — R² (absolute) AND Spearman (does the PATTERN transfer?)
+    from scipy.stats import spearmanr
     print("\nLeave-one-site-out generality (train others → predict held-out site):")
     names = list(data)
+    r2s, sps = [], []
     for held in names:
         if len(names) < 2:
             break
@@ -91,8 +100,12 @@ def main():
         Xte, yte = data[held]
         mdl = g_fit(Xtr, ytr)
         pred = np.clip(mdl.predict(Xte), 0, None)
-        print(f"  train {[n for n in names if n != held]} → {held}: R² {M.r2(pred, yte):.3f} "
-              f"(n_test {len(yte)})")
+        r2 = M.r2(pred, yte); sp = spearmanr(pred, yte).correlation
+        r2s.append(r2); sps.append(sp)
+        print(f"  → {held:5}: R² {r2:+.3f}  Spearman {sp:+.3f}  (n_test {len(yte)})")
+    if r2s:
+        print(f"  MEAN: R² {np.mean(r2s):+.3f}  Spearman {np.mean(sps):+.3f}  "
+              "(Spearman>0 = the spatial PATTERN transfers even if absolute scale doesn't)")
 
     X = np.vstack([data[n][0] for n in names])
     y = np.concatenate([data[n][1] for n in names])
