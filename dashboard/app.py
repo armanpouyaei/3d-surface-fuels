@@ -281,18 +281,33 @@ def synced_heatmaps(panels):
 
 
 def rgb_vs_structure(rgb, pred, vmax):
-    """Real Esri satellite RGB next to the predicted structure (both north-up).
-    ``rgb`` is row 0 = north (go.Image origin top); ``pred`` is row 0 = south
-    (go.Heatmap origin bottom) — so both render north-up with no flipping."""
-    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.04,
+    """Real Esri satellite RGB next to the predicted structure, rendered at the SAME
+    size. Both arrays are resampled to the same (ny,nx) grid and drawn as go.Image with
+    an identical square aspect, so the two panels match exactly. ``rgb`` row 0 = north;
+    ``pred`` row 0 = south → flip pred to north-up to align with the satellite."""
+    import matplotlib
+    try:
+        cmap = matplotlib.colormaps["YlOrRd"]
+    except Exception:
+        import matplotlib.cm as _cm
+        cmap = _cm.get_cmap("YlOrRd")
+    ny, nx = pred.shape
+    fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.06,
                         subplot_titles=["🛰️ Esri satellite (real)", "Predicted surface structure"])
-    if rgb is not None:
-        fig.add_trace(go.Image(z=rgb), row=1, col=1)
-    fig.add_trace(go.Heatmap(z=pred, zmin=0, zmax=vmax, colorscale=COLORSCALE,
-                             colorbar=dict(title="kg/m²")), row=1, col=2)
+    rgb_img = _resample_rgb(rgb, ny, nx) if rgb is not None else np.full((ny, nx, 3), 230, np.uint8)
+    fig.add_trace(go.Image(z=rgb_img), row=1, col=1)
+    # colormap the structure to an RGB image on the SAME grid (north-up) so both panels match
+    norm = np.clip(np.flipud(pred) / (vmax + 1e-9), 0, 1)
+    srgb = (cmap(norm)[:, :, :3] * 255).astype(np.uint8)
+    fig.add_trace(go.Image(z=srgb), row=1, col=2)
+    # colorbar for the structure scale, without affecting the image axes
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", hoverinfo="skip", showlegend=False,
+                             marker=dict(colorscale=COLORSCALE, cmin=0, cmax=vmax, color=[0],
+                                         showscale=True, colorbar=dict(title="kg/m²", thickness=12,
+                                                                       len=0.85, x=1.005))), row=1, col=2)
     fig.update_xaxes(showticklabels=False)
     fig.update_yaxes(showticklabels=False)
-    fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0))
+    fig.update_layout(height=440, margin=dict(l=0, r=0, t=30, b=0))
     return fig
 
 
