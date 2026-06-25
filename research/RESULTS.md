@@ -167,24 +167,30 @@ combined surface+tree export wasn't available; the tree grid is the canopy shown
 ## 2d. Global "generate anywhere" — on-demand inference (`portable.py`, dashboard tab)
 
 A **portable Stage-1 model** (`scripts/train_portable.py` → `stage1_portable.joblib`)
-trained once on US sites (OSBS + SOAP, 30k pooled 10 m samples) using **only global,
-free predictors** (AlphaEarth + Sentinel-1 — *no LiDAR at inference*). The dashboard's
-**🌍 Generate anywhere** tab takes any lat/lon → fetches AEF+S1 for that AOI → predicts
-30 m→1 m structure + 3D voxels, with **conformal intervals**, an **OOD flag**, and a
-**disk cache**. Verified live: OSBS-2018 **1 % OOD** (in-distribution), OSBS-2022 3 %,
-Amazon **100 % OOD** (correctly flagged).
+trained once on **6 diverse US ecosystems** (OSBS longleaf savanna, SOAP Sierra conifer,
+CPER shortgrass steppe, WREF PNW tall conifer, SRER desert shrub, HARV eastern deciduous;
+**74 k pooled 10 m samples**) using **only global, free predictors** (AlphaEarth +
+Sentinel-1 — *no LiDAR at inference*), each vintage-matched to its 3DEP year. The
+dashboard's **🌍 Generate anywhere** tab takes any lat/lon → fetches AEF+S1 → predicts
+30 m→1 m structure + 3D voxels, with **conformal intervals**, an **OOD flag**, a
+side-by-side **FastFuels/global-baseline** panel, and a **disk cache**.
 
-- **Design:** on-demand per-AOI (no world-wide pre-grid) + cache. **Memory-safe by
-  construction** — inference runs at 10 m (a 1500 m AOI is 150×150×66 floats ≈ 6 MB),
-  hard AOI cap 2000 m, 1 m export voxel-budgeted; the UI shows the footprint pre-run.
-- **OOD is computed on AlphaEarth bands only** (Sentinel-1 availability is flaky
-  globally; including it spuriously inflated the distance). It reflects novelty in
-  **ecosystem AND AEF year** and is conservative by design.
-- **Honest generality limit:** leave-one-site-out transfer is weak (R² −0.18 / −0.45)
-  with only 2 opposite training ecosystems — so most non-(SE-savanna/Sierra-conifer)
-  locations flag OOD. The flag is the safeguard; **adding 3DEP training sites is the
-  path to real global generality.** This tab is a *capability* demo, validated only
-  where we have US truth.
+- **Design:** on-demand per-AOI (no world-wide pre-grid) + canonical-tile cache.
+  **Memory-safe by construction** — inference at 10 m (a 1500 m AOI ≈ 6 MB), hard AOI
+  cap 2000 m, 1 m export voxel-budgeted; UI shows the footprint pre-run.
+- **OOD on AlphaEarth bands only** (S1 availability is flaky globally; including it
+  spuriously inflated the distance). Reflects novelty in ecosystem AND AEF year.
+- **The honest, important finding — cross-ecosystem transfer is hard.** Even with 6
+  ecosystems, **leave-one-site-out R² stays mostly negative** (osbs −0.19, soap −1.15,
+  cper −0.07, **wref +0.16**, srer −1.46, harv −0.40). Predicting an *unseen* ecosystem's
+  fine surface structure from spaceborne does **not** generalize well — consistent with
+  the documented ceilings (Leite 0.31, Labenski 0.27–0.41). Adding sites **broadens
+  in-distribution coverage and makes the OOD flag more meaningful** (more of the world now
+  resembles a training ecosystem), and improves in-distribution fit (74 k vs 30 k samples)
+  — but it does **not** make the model predict a brand-new ecosystem sharply. The product
+  is honestly: *grounded where the world resembles a training ecosystem, OOD-flagged
+  elsewhere.* The real path to global sharpness is many more sites (continental-scale
+  training) — the design supports it; this is a capability demo, not a solved global product.
 
 ## 3. Supporting real-data results
 

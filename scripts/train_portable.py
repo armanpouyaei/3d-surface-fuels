@@ -23,9 +23,13 @@ from surface_fuels import FuelVoxelGrid, GeoRef, lidar, metrics as M, embeddings
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 RES = 10.0  # AlphaEarth-native training resolution
 
-SITES = [
-    {"name": "osbs", "laz": "data/raw/osbs_3dep_2018.laz", "src": 6438, "tgt": 32617, "year": 2018, "z": "ft_us"},
-    {"name": "soap", "laz": "data/raw/soap_3dep_2022.laz", "src": 6340, "tgt": 32611, "year": 2022, "z": "m"},
+SITES = [  # diverse ecosystems; src/tgt EPSG + z-unit + AEF year verified per LAZ header
+    {"name": "osbs", "laz": "data/raw/osbs_3dep_2018.laz", "src": 6438, "tgt": 32617, "year": 2018, "z": "ft_us"},  # longleaf savanna FL
+    {"name": "soap", "laz": "data/raw/soap_3dep_2022.laz", "src": 6340, "tgt": 32611, "year": 2022, "z": "m"},      # Sierra conifer CA
+    {"name": "cper", "laz": "data/raw/cper_3dep.laz", "src": 6430, "tgt": 32613, "year": 2018, "z": "ft_us"},        # shortgrass steppe CO (CO N State Plane ftUS)
+    {"name": "wref", "laz": "data/raw/wref_3dep.laz", "src": 6339, "tgt": 32610, "year": 2018, "z": "m"},            # PNW tall conifer WA
+    {"name": "srer", "laz": "data/raw/srer_3dep.laz", "src": 6341, "tgt": 32612, "year": 2020, "z": "m"},            # desert shrub AZ
+    {"name": "harv", "laz": "data/raw/harv_3dep.laz", "src": 6347, "tgt": 32618, "year": 2024, "z": "m"},            # eastern deciduous MA
 ]
 
 
