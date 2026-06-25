@@ -109,9 +109,8 @@ FBFM40_LOAD = {}  # numeric FBFM40 code -> total surface load (kg/m²)
 for _name, _t in _SB40_TONS.items():
     FBFM40_LOAD[_PREFIX_BASE[_name[:2]] + int(_name[2:])] = round(_t * _TON_ACRE_KG_M2, 4)
 
-# LANDFIRE FBFM40 ImageServer per US region (free, no key) — for FastFuels' surface layer.
-_LF_SERVICE = {"CONUS": "Landfire_LF2024/LF2024_FBFM40_CONUS", "AK": "Landfire_LF2024/LF2024_FBFM40_AK",
-               "HI": "Landfire_LF2024/LF2024_FBFM40_HI", "PRVI": "Landfire_LF2024/LF2024_FBFM40_PRVI"}
+# LANDFIRE FBFM40 ImageServer (free, no key) — available release years for vintage-matching.
+_LF_YEARS = [2016, 2022, 2023, 2024]
 
 
 def _lf_region(lon, lat):
@@ -126,35 +125,55 @@ def _lf_region(lon, lat):
     return None
 
 
-def fastfuels_surface_aoi(out: Dict, lat: float, lon: float):
+def _lf_service(region, aef_year):
+    """LANDFIRE FBFM40 service for the release year nearest the AlphaEarth year (tie → later)."""
+    y = min(_LF_YEARS, key=lambda yy: (abs(yy - int(aef_year)), -yy))
+    return f"Landfire_LF{y}/LF{y}_FBFM40_{region}", y
+
+
+def _fetch_fbfm40(out, service):
+    import io
+    import requests
+    import rasterio
+    ny, nx = out["pred10"].shape
+    x0, y0, res, epsg = float(out["x0"]), float(out["y0"]), float(out["res"]), int(out["epsg"])
+    url = f"https://lfps.usgs.gov/arcgis/rest/services/{service}/ImageServer/exportImage"
+    r = requests.get(url, timeout=60, headers={"User-Agent": "Mozilla/5.0"}, params={
+        "bbox": f"{x0},{y0},{x0 + nx * res},{y0 + ny * res}", "bboxSR": epsg, "imageSR": epsg,
+        "size": f"{nx},{ny}", "format": "tiff", "pixelType": "U16",
+        "interpolation": "RSP_NearestNeighbor", "f": "image"})
+    if r.status_code != 200 or "tiff" not in r.headers.get("content-type", ""):
+        return None
+    with rasterio.open(io.BytesIO(r.content)) as s:
+        codes = s.read(1)                           # north-up (ArcGIS exportImage)
+    load = np.zeros(codes.shape, np.float32)        # non-burnable / unmapped -> 0
+    for code in np.unique(codes):
+        if int(code) in FBFM40_LOAD:
+            load[codes == code] = FBFM40_LOAD[int(code)]
+    return load
+
+
+def fastfuels_surface_aoi(out: Dict, lat: float, lon: float, year: int = 2024):
     """FastFuels' surface fuel LOAD (kg/m²) over the AOI: LANDFIRE FBFM40 → SB40 lookup,
-    aligned to our prediction grid (north-up). Returns None outside US / on failure.
+    aligned to our grid (north-up), using the LANDFIRE release nearest ``year`` (the
+    AlphaEarth vintage). Returns (load, lf_year) — (None, None) outside US / on failure.
     Uniform per 30 m fuel-model class — the baseline our heterogeneous product improves on."""
     region = _lf_region(lon, lat)
     if region is None:
-        return None
-    try:
-        import io
-        import requests
-        import rasterio
-        ny, nx = out["pred10"].shape
-        x0, y0, res, epsg = float(out["x0"]), float(out["y0"]), float(out["res"]), int(out["epsg"])
-        url = f"https://lfps.usgs.gov/arcgis/rest/services/{_LF_SERVICE[region]}/ImageServer/exportImage"
-        r = requests.get(url, timeout=60, headers={"User-Agent": "Mozilla/5.0"}, params={
-            "bbox": f"{x0},{y0},{x0 + nx * res},{y0 + ny * res}", "bboxSR": epsg, "imageSR": epsg,
-            "size": f"{nx},{ny}", "format": "tiff", "pixelType": "U16",
-            "interpolation": "RSP_NearestNeighbor", "f": "image"})
-        if r.status_code != 200 or "tiff" not in r.headers.get("content-type", ""):
-            return None
-        with rasterio.open(io.BytesIO(r.content)) as s:
-            codes = s.read(1)                       # north-up (ArcGIS exportImage)
-        load = np.zeros(codes.shape, np.float32)    # non-burnable / unmapped -> 0
-        for code in np.unique(codes):
-            if int(code) in FBFM40_LOAD:
-                load[codes == code] = FBFM40_LOAD[int(code)]
-        return load
-    except Exception:
-        return None
+        return None, None
+    svc, lfy = _lf_service(region, year)
+    tried = []
+    for service, yy in [(svc, lfy), (f"Landfire_LF2024/LF2024_FBFM40_{region}", 2024)]:
+        if service in tried:
+            continue
+        tried.append(service)
+        try:
+            load = _fetch_fbfm40(out, service)
+        except Exception:
+            load = None
+        if load is not None:
+            return load, yy
+    return None, None
 
 
 # ── GLOBAL categorical baseline: ESA WorldCover (10 m, global) → fuel-load crosswalk ──

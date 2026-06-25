@@ -115,11 +115,12 @@ def load_aoi_basemap(west, south, east, north, epsg, px=512):
 
 
 @st.cache_data(show_spinner=False)
-def load_ff_surface(x0, y0, res, ny, nx, epsg, lat, lon):
-    """FastFuels surface load (LANDFIRE FBFM40 → SB40) over the AOI, cached. None outside US."""
+def load_ff_surface(x0, y0, res, ny, nx, epsg, lat, lon, year):
+    """FastFuels surface load (LANDFIRE FBFM40 → SB40) over the AOI, cached. Uses the LANDFIRE
+    release nearest the AlphaEarth year. Returns (load, lf_year); (None, None) outside US."""
     from surface_fuels import portable
     out = {"pred10": np.zeros((ny, nx), np.float32), "x0": x0, "y0": y0, "res": res, "epsg": epsg}
-    return portable.fastfuels_surface_aoi(out, lat, lon)
+    return portable.fastfuels_surface_aoi(out, lat, lon, int(year))
 
 
 @st.cache_data(show_spinner=False)
@@ -751,9 +752,9 @@ elif source.startswith("🌍"):
     args = (west, south, float(out["res"]), ny0, nx0, int(out["epsg"]), float(lat), float(lon))
     with st.spinner("Fetching Esri satellite + reference fuel layer for the AOI…"):
         rgb = load_aoi_basemap(west, south, east, north, int(out["epsg"]))
-        ff = load_ff_surface(*args)                       # real FastFuels (LANDFIRE) — US only
-        if ff is not None:
-            ff_label, ff_src = "FastFuels surface (LANDFIRE→SB40)", "fastfuels"
+        ff, lf_year = load_ff_surface(*args, int(out["year"]))   # real FastFuels (LANDFIRE) — US only
+        if ff is not None:                                # vintage-matched to the AlphaEarth year
+            ff_label, ff_src = f"FastFuels surface (LANDFIRE {lf_year}→SB40)", "fastfuels"
         else:                                             # global fallback baseline
             ff = load_global_surface(*args)
             ff_label, ff_src = "Global baseline (WorldCover→fuel)", "worldcover"
