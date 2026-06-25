@@ -13,21 +13,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from surface_fuels import portable  # noqa: E402
 
-# (label, lat, lon, in_training_region?)  — small AOIs keep AEF fetches quick
+# (label, lat, lon, kind) — small AOIs keep AEF fetches quick. After adding tropical (PR),
+# boreal (Latvia) and arid (Mojave) training, the once-foreign biomes should move in-distribution.
 POINTS = [
-    ("Germany (Harz)",        51.75,  10.60, "EU-new"),
-    ("UK (Midlands)",         52.50,  -1.50, "EU-new"),
-    ("Spain (Castile)",       40.50,  -4.00, "EU-new"),
-    ("Sweden (boreal)",       60.20,  15.60, "EU-new"),
-    ("Switzerland*",          46.80,   8.20, "train"),
-    ("France*",               45.20,   6.10, "train"),
-    ("Netherlands*",          52.10,   5.80, "train"),
+    ("Germany (temperate)",   51.75,  10.60, "EU"),
+    ("Sweden (boreal)",       60.20,  15.60, "boreal-new"),
+    ("Finland (boreal)",      62.00,  26.00, "boreal-new"),
+    ("Canada (boreal)",       54.00, -98.00, "boreal-new"),
+    ("Amazon (tropical)",     -3.10, -60.00, "tropical-new"),
+    ("Congo (tropical)",      -1.00,  23.00, "tropical-new"),
+    ("SE Asia (tropical)",     0.50, 113.00, "tropical-new"),
+    ("Sahara (Niger)",        18.00,  10.00, "arid-new"),
+    ("Outback (Australia)",  -25.00, 133.00, "arid-new"),
+    ("Arabia (desert)",       23.00,  45.00, "arid-new"),
     ("OSBS Florida* (US)",    29.68, -82.00, "train"),
-    ("SRER Arizona* (US)",    31.82,-110.87, "train"),
-    ("Amazon (Brazil)",       -3.10, -60.00, "foreign"),
-    ("Sahara (Niger)",        18.00,  10.00, "foreign"),
-    ("Outback (Australia)",  -25.00, 133.00, "foreign"),
-    ("Congo basin",           -1.00,  23.00, "foreign"),
+    ("Puerto Rico* (trop)",   18.14, -65.50, "train"),
+    ("Mojave* (arid)",        35.90,-115.12, "train"),
 ]
 
 print(f"{'region':<24}{'kind':<9}{'frac_OOD':>9}   verdict")
@@ -35,7 +36,7 @@ print("-" * 60)
 for label, lat, lon, kind in POINTS:
     try:
         r = portable.predict_aoi(lat, lon, size=300.0, year=2022, res=10,
-                                 use_cache=True, version="v2")
+                                 use_cache=True, version="v3")
         f = r["frac_ood"]
         verdict = "IN-dist" if f < 0.5 else ("OOD" if f > 0.9 else "borderline")
         print(f"{label:<24}{kind:<9}{f:>9.2f}   {verdict}", flush=True)

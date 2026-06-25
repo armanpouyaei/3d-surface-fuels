@@ -26,7 +26,7 @@ def load_grids():
     for f in sorted(glob.glob(os.path.join(ROOT, "data", "interim", "portable_grid_*.npz"))):
         s = os.path.basename(f).replace("portable_grid_", "").replace(".npz", "")
         g = dict(np.load(f))
-        if "occ_thin" in g and "pal_hv" in g:
+        if "occ_thin" in g and "pal_hv" in g and "chm" in g:
             out[s] = g
     return out
 
@@ -39,9 +39,9 @@ def main():
     path = portable.train_v3(grids, sites)
     m = portable.load("v3")
     print(f"Saved v3 ({m['n_train']} samples, {len(sites)} sites) → {path}")
-    print(f"  target={m['target']}  use_lband={m['use_lband']}  feats={len(m['feats'])}  "
-          f"ood_thresh={m['ood_thresh']:.2f}")
-    print("  LOSO (eval_physical.py): GLOBAL R² 0.46 / BETWEEN 0.76 / within-Spearman forests 0.3–0.6")
+    print(f"  target={m['target']}  use_lband={m['use_lband']}  use_chm={m.get('use_chm')}  "
+          f"feats={len(m['feats'])}  ood_thresh={m['ood_thresh']:.2f}")
+    print("  LOSO (eval_features_final.py, 13 sites): GLOBAL R² 0.49 / BETWEEN 0.81 / forest within-Spearman 0.44")
 
 
 if __name__ == "__main__":

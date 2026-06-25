@@ -82,8 +82,8 @@ MODEL_V2_PATH = os.path.join(PROC, "stage1_portable_v2.joblib")
 MODEL_V3_PATH = os.path.join(PROC, "stage1_portable_v3.joblib")
 MODELS = {"v1": MODEL_PATH, "v2": MODEL_V2_PATH, "v3": MODEL_V3_PATH}
 
-# v3 feature order (MUST match training in scripts/train_v3.py and _features(lband=True))
-FEATS_V3 = FEATS + ["pal_hh", "pal_hv", "pal_ratio"]
+# v3 feature order (MUST match training in scripts/train_v3.py and _features(lband=True, chm=True))
+FEATS_V3 = FEATS + ["pal_hh", "pal_hv", "pal_ratio", "chm"]
 
 
 def _tile_std_aef(X, n_aef=64):
@@ -130,30 +130,37 @@ def train_v3(grids: Dict, sites: list, out_path: str = MODEL_V3_PATH, quantiles=
     (HH/HV/ratio) — NO tile-std (domain adaptation erases the between-biome level we want).
     Reaches GLOBAL R² 0.46 / BETWEEN-biome 0.76 (LOSO). OOD on raw AlphaEarth bands."""
     import joblib
-    X_l, y_l = [], []
-    for n in sites:
+    X_l, y_l, sid_l = [], [], []
+    for i, n in enumerate(sites):
         g = grids[n]
         v = g["valid"].ravel()
-        cols = [np.nan_to_num(g["aef"][i]).ravel() for i in range(64)]
+        cols = [np.nan_to_num(g["aef"][i_]).ravel() for i_ in range(64)]
         cols += [np.nan_to_num(g["s1"][0]).ravel(), np.nan_to_num(g["s1"][1]).ravel()]
         cols += [np.nan_to_num(g["pal_hh"]).ravel(), np.nan_to_num(g["pal_hv"]).ravel(),
-                 np.nan_to_num(g["pal_ratio"]).ravel()]
-        X_l.append(np.stack(cols, 1).astype(np.float32)[v])
-        y_l.append(g["occ_thin"].ravel()[v].astype(np.float32))
-    X, y = np.vstack(X_l), np.concatenate(y_l)
+                 np.nan_to_num(g["pal_ratio"]).ravel(), np.nan_to_num(g["chm"]).ravel()]
+        Xi = np.stack(cols, 1).astype(np.float32)[v]
+        X_l.append(Xi); y_l.append(g["occ_thin"].ravel()[v].astype(np.float32))
+        sid_l.append(np.full(len(Xi), i))
+    X, y, sid = np.vstack(X_l), np.concatenate(y_l), np.concatenate(sid_l)
     rng = np.random.default_rng(0)
     cal = rng.random(len(y)) < 0.25
     models = g30._fit_quantiles(X[~cal], y[~cal], quantiles)
     delta = g30._cqr_delta(models, X[cal], y[cal], quantiles[0], quantiles[-1])
     mu, sd = X.mean(0), X.std(0) + 1e-9
     Zaef = ((X - mu) / sd)[:, :64]                       # OOD on raw AlphaEarth bands
-    centroid = Zaef.mean(0)
-    ood = np.sqrt(((Zaef - centroid) ** 2).sum(1))
+    # PER-BIOME-RADIUS OOD: a single global centroid mislabels the most distinct TRAINED biome
+    # (tropical PR) as OOD, and a global min-distance threshold is over-sensitive (off-year training
+    # sites flag). Instead: each biome has its own centroid + radius (95th-pct of its members'
+    # distances). A cell is in-distribution if it lies within ANY biome's radius -> ood score =
+    # min_i ||z - c_i|| / r_i, threshold 1.0. Foreign biomes sit far beyond every radius.
+    centroids = np.stack([Zaef[sid == i].mean(0) for i in range(len(sites))])   # (n_sites, 64)
+    radii = np.array([np.percentile(np.sqrt(((Zaef[sid == i] - centroids[i]) ** 2).sum(1)), 99)
+                      for i in range(len(sites))]) + 1e-6                        # 99th-pct biome spread
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     joblib.dump({"models": models, "quantiles": quantiles, "delta": float(delta),
-                 "tile_std": False, "use_lband": True, "target": "occ_thin",
-                 "mu": mu, "sd": sd, "centroid": centroid, "n_aef": 64,
-                 "ood_thresh": float(np.percentile(ood, 95)), "feats": FEATS_V3,
+                 "tile_std": False, "use_lband": True, "use_chm": True, "target": "occ_thin",
+                 "mu": mu, "sd": sd, "centroid": Zaef.mean(0), "centroids": centroids,
+                 "radii": radii, "n_aef": 64, "ood_thresh": 1.0, "feats": FEATS_V3,
                  "sites": sites, "n_train": int(len(y))}, out_path)
     return out_path
 
@@ -213,6 +220,53 @@ def palsar_for_grid(grid, year: int) -> Optional[Dict]:
             m = np.nanmedian(a)
             return np.where(np.isfinite(a), a, m if np.isfinite(m) else 0.0).astype(np.float32)
         return {"pal_hh": finish(hh_db), "pal_hv": finish(hv_db), "pal_ratio": finish(ratio), "pal_year": yr}
+    except Exception:
+        return None
+
+
+CHM_BASE = "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm"
+
+
+def _slippy_quadkey(lat: float, lon: float, z: int = 9) -> str:
+    """lat/lon -> Bing/slippy quadkey at zoom z (Meta canopy-height tile naming)."""
+    import math
+    n = 2 ** z
+    xt = min(max(int((lon + 180.0) / 360.0 * n), 0), n - 1)
+    yt = min(max(int((1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n), 0), n - 1)
+    qk = ""
+    for i in range(z, 0, -1):
+        d, mask = 0, 1 << (i - 1)
+        if xt & mask:
+            d += 1
+        if yt & mask:
+            d += 2
+        qk += str(d)
+    return qk
+
+
+def chm_for_grid(grid) -> Optional[np.ndarray]:
+    """Meta/WRI 1 m global canopy-height (GEDI+ALS-calibrated) averaged to the grid, row 0 = south.
+    Free/ungated AWS COG, range-read by zoom-9 quadkey. Returns (ny,nx) metres, or None."""
+    try:
+        import rasterio
+        from rasterio.warp import reproject, Resampling
+        from affine import Affine
+        from pyproj import Transformer
+        g = grid.georef
+        epsg = int(str(g.crs).split(":")[-1])
+        clon, clat = Transformer.from_crs(epsg, 4326, always_xy=True).transform(
+            g.x0 + grid.nx * grid.dx / 2.0, g.y0 + grid.ny * grid.dy / 2.0)
+        qk = _slippy_quadkey(clat, clon, 9)
+        href = f"/vsicurl/{CHM_BASE}/{qk}.tif"
+        ny, nx = grid.ny, grid.nx
+        dst_t = Affine(grid.dx, 0, g.x0, 0, -grid.dy, g.y0 + ny * grid.dy)
+        out = np.zeros((ny, nx), np.float32)
+        with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MULTIPLEX="YES",
+                          AWS_NO_SIGN_REQUEST="YES"):
+            with rasterio.open(href) as src:
+                reproject(rasterio.band(src, 1), out, dst_transform=dst_t, dst_crs=f"EPSG:{epsg}",
+                          resampling=Resampling.average)
+        return np.clip(np.flipud(out).astype(np.float32), 0, None)   # metres; 0 = no canopy
     except Exception:
         return None
 
@@ -430,7 +484,8 @@ def _aoi_grid(lat, lon, size, res) -> Tuple[FuelVoxelGrid, int]:
     return grid, epsg
 
 
-def _features(grid, year, lband: bool = False) -> Tuple[Optional[np.ndarray], Tuple[int, int], bool]:
+def _features(grid, year, lband: bool = False, chm: bool = False
+              ) -> Tuple[Optional[np.ndarray], Tuple[int, int], bool]:
     aef = emb.aef_for_grid(grid, year=year)
     if aef is None:
         return None, (grid.ny, grid.nx), False
@@ -447,6 +502,9 @@ def _features(grid, year, lband: bool = False) -> Tuple[Optional[np.ndarray], Tu
             cols += [pal["pal_hh"].ravel(), pal["pal_hv"].ravel(), pal["pal_ratio"].ravel()]
         else:
             cols += [np.zeros(ny * nx, np.float32)] * 3
+    if chm:                                # v3: Meta global canopy height (GEDI-densified)
+        c = chm_for_grid(grid)
+        cols += [(c if c is not None else np.zeros((ny, nx), np.float32)).ravel()]
     return np.stack(cols, 1).astype(np.float32), (ny, nx), s1 is not None
 
 
@@ -474,7 +532,7 @@ def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
     if m is None:
         raise RuntimeError(f"Portable model '{version}' not found — train it first.")
     grid, epsg = _aoi_grid(lat, lon, size, res)
-    X, (ny, nx), has_s1 = _features(grid, year, lband=bool(m.get("use_lband")))
+    X, (ny, nx), has_s1 = _features(grid, year, lband=bool(m.get("use_lband")), chm=bool(m.get("use_chm")))
     if X is None:
         raise RuntimeError(f"AlphaEarth unavailable for {year} at ({lat:.3f},{lon:.3f}). "
                            "Try a year in 2017-2024.")
@@ -485,7 +543,17 @@ def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
     lo = m["models"][qs[0]].predict(Xp) - m["delta"]
     hi = m["models"][qs[-1]].predict(Xp) + m["delta"]
     Zaef = ((X - m["mu"]) / m["sd"])[:, :n_aef]      # OOD on RAW AlphaEarth bands (flags domain shift)
-    ood = np.sqrt(((Zaef - m["centroid"]) ** 2).sum(1))
+    cents, radii = m.get("centroids"), m.get("radii")
+    if cents is not None and radii is not None:       # per-biome-radius OOD (in-dist within ANY biome)
+        ood = np.full(len(Zaef), np.inf, np.float64)
+        for c, r in zip(cents, radii):
+            ood = np.minimum(ood, np.sqrt(((Zaef - c) ** 2).sum(1)) / r)
+    elif cents is not None:                            # nearest-cluster (unnormalized) fallback
+        ood = np.full(len(Zaef), np.inf, np.float64)
+        for c in cents:
+            ood = np.minimum(ood, np.sqrt(((Zaef - c) ** 2).sum(1)))
+    else:
+        ood = np.sqrt(((Zaef - m["centroid"]) ** 2).sum(1))
     pred10 = np.clip(med, 0, None).reshape(ny, nx)
     out = {
         "pred10": pred10,

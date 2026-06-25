@@ -355,6 +355,44 @@ LANDFIRE FBFM40 fuel-model class (`scripts/validate_v3_vs_fastfuels.py`,
   generalizes the *level* across biomes (§2f). v3 wins the within-seen comparison on both within-block
   R² and CV at every site.
 
+## 2h. Broader biome coverage + canopy height + robust OOD (a, b)
+
+Pushed the v3 model from 10 → **13 ecosystems / 4 continents** by adding tropical (Puerto Rico
+3DEP), boreal (Latvia LGIA), and arid (Mojave 3DEP) tiles (`scripts/build_new_biomes.py`;
+**150 k samples**), plus a new free physical feature.
+
+**(b) Global canopy height helps** (`scripts/add_canopy.py`, `scripts/eval_features_final.py`).
+Meta/WRI 1 m canopy height — the **GEDI+ALS-calibrated** product, free/ungated AWS COG, range-read
+by quadkey — added as a feature. LOSO ablation on occ_thin (13 sites):
+
+| features | GLOBAL R² | BETWEEN R² | forest within-Spearman |
+|---|---|---|---|
+| AEF + S1 | 0.27 | 0.59 | 0.34 |
+| + L-band | 0.46 | 0.79 | 0.39 |
+| **+ L-band + canopy** | **0.49** | **0.81** | **0.44** |
+
+Canopy height lifts both the global level and within-forest pattern transfer; terrain adds nothing
+beyond it. So **v3 is now AEF + S1 + L-band PALSAR + canopy height** (raw), GLOBAL R² **0.49**,
+between-biome **0.81**. (This is the GEDI signal, in usable gridded form — sparse GEDI footprints
+aren't a per-tile feature, but the GEDI-trained canopy-height raster is.)
+
+**(a) Broader coverage shrinks the OOD-flagged globe — honestly** (`scripts/check_ood_global.py`):
+
+- **Boreal: brought in.** The Latvia tile moved Scandinavian boreal in-distribution — Sweden
+  0.88 → **0.00**, Finland **0.00**. (Canadian boreal still flagged — different forest composition.)
+- **Arid: partial.** Mojave brought semi-arid Arabia to borderline (0.50); hyper-arid Sahara/Outback
+  stay flagged (sand ≠ desert scrub).
+- **Tropical: limited.** Caribbean Puerto Rico does **not** generalize to equatorial rainforest —
+  Amazon/Congo/SE Asia stay OOD. An actual rainforest tile is needed (honest limit; the design supports it).
+
+**OOD method fix — per-biome radius.** Adding a very distinct trained biome (tropical PR) exposed a
+flaw: a **single global centroid** + global-percentile threshold mislabels the most distinct *trained*
+biome as OOD (PR read 100 % OOD at its own tile). Fixed to a **per-biome-radius** rule: each biome has
+its own centroid + 99th-pct radius; a cell is in-distribution if it falls within **any** biome's radius
+(`ood = min_i ‖z−c_i‖ / r_i`, threshold 1.0). Verified clean separation — **all 13 training sites
+in-distribution at their own tile** (≤0.01), **foreign biomes flagged** (Amazon 0.87, Congo/Sahara/
+Outback 1.00). The OOD flag now means what it says: *flagged only if unlike every training ecosystem.*
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only

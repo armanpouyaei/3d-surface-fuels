@@ -35,6 +35,10 @@ SITES = [  # diverse ecosystems; src/tgt EPSG + z-unit + AEF year verified per L
     {"name": "ch",   "laz": "data/raw/ch.las",  "src": 2056,  "tgt": 32632, "year": 2019, "z": "m"},                # Switzerland temperate/foothill forest (swissSURFACE3D)
     {"name": "nl",   "laz": "data/raw/nl.laz",  "src": 28992, "tgt": 32631, "year": 2022, "z": "m"},                # Netherlands heath + Scots pine (AHN4)
     {"name": "fr",   "laz": "data/raw/fr.laz",  "src": 2154,  "tgt": 32631, "year": 2024, "z": "m"},                # France pre-alpine mixed forest (IGN LiDAR HD)
+    # biome-coverage expansion (tropical / boreal / arid) to shrink the OOD-flagged globe
+    {"name": "pr",     "laz": "data/raw/pr.laz",     "src": 6566, "tgt": 32620, "year": 2018, "z": "m"},            # tropical/subtropical broadleaf, Puerto Rico 3DEP
+    {"name": "lva",    "laz": "data/raw/lva.las",    "src": 3059, "tgt": 32635, "year": 2018, "z": "m"},            # boreal/hemiboreal conifer, Latvia LGIA
+    {"name": "mojave", "laz": "data/raw/mojave.laz", "src": 6350, "tgt": 32611, "year": 2019, "z": "m"},            # arid Mojave desert scrub, 3DEP
     # akf (Alaska Fairbanks boreal, EPSG 6335) intentionally omitted — AlphaEarth mirror coverage ends ~64°N (AEF fetch fails)
 ]
 

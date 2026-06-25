@@ -291,9 +291,15 @@ def synced_heatmaps(panels):
             z=np.flipud(p["z"]), zmin=p["cmin"], zmax=p["cmax"], colorscale=p["colorscale"],
             showscale=p.get("cbar", False), colorbar=cbar),
             row=1, col=i)
-    fig.update_xaxes(matches="x", showticklabels=False)
-    fig.update_yaxes(matches="y", autorange="reversed", showticklabels=False)
-    fig.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0), dragmode="zoom")
+    # square panels (match the go.Image row above): lock each subplot's y to its x at 1:1.
+    # x keeps `matches` for synchronized horizontal zoom; y uses scaleanchor (not matches) so
+    # the two constraints never sit on the same axis.
+    fig.update_xaxes(matches="x", showticklabels=False, constrain="domain")
+    for i in range(1, n + 1):
+        xa = "x" if i == 1 else f"x{i}"
+        fig.update_yaxes(scaleanchor=xa, scaleratio=1, constrain="domain",
+                         autorange="reversed", showticklabels=False, row=1, col=i)
+    fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0), dragmode="zoom")
     return fig
 
 
@@ -667,12 +673,12 @@ elif source.startswith("🌍"):
                                 help="Training vintages: OSBS 2018, SOAP 2022. Off-vintage years read as OOD.")
         size = st.slider("AOI tile size (m)", 400, int(portable.MAX_AOI_M), 1000, step=100,
                          help="Side of each canonical grid tile. Defines the fixed global tiling + cache.")
-        mver = st.radio("Model", ["v3 (cross-biome · +L-band)", "v2 (domain-adapted)", "v1 (baseline)"], index=0,
-                        help="v3 = the cracked cross-ecosystem config: vertical-occupancy target + "
-                             "AlphaEarth + Sentinel-1 + L-band PALSAR (raw). Leave-one-site-out GLOBAL "
-                             "R² 0.46, between-biome 0.76 — places an unseen biome at the right absolute "
-                             "structure level. v2 domain-adapts (good within-site, erases the biome level). "
-                             "v1 is the raw baseline.")
+        mver = st.radio("Model", ["v3 (cross-biome · +L-band+canopy)", "v2 (domain-adapted)", "v1 (baseline)"], index=0,
+                        help="v3 = the cracked cross-ecosystem config: vertical-occupancy target + AlphaEarth + "
+                             "Sentinel-1 + L-band PALSAR + global canopy height (raw), trained on 13 ecosystems / "
+                             "4 continents. Leave-one-site-out GLOBAL R² 0.49, between-biome 0.81 — places an unseen "
+                             "biome at the right absolute structure level. v2 domain-adapts (good within-site, erases "
+                             "the biome level). v1 is the raw baseline.")
         model_version = "v3" if mver.startswith("v3") else ("v2" if mver.startswith("v2") else "v1")
         ZMIN = 13
 
@@ -728,7 +734,7 @@ elif source.startswith("🌍"):
 
     if go_btn:
         try:
-            extra = " + L-band PALSAR" if model_version == "v3" else ""
+            extra = " + L-band PALSAR + canopy height" if model_version == "v3" else ""
             with st.spinner(f"Fetching AlphaEarth {year} + Sentinel-1{extra} for ({lat:.3f}, {lon:.3f})…"):
                 st.session_state["aoi"] = portable.predict_aoi(lat, lon, float(size), int(year),
                                                                version=model_version)
@@ -745,10 +751,10 @@ elif source.startswith("🌍"):
     thr, frac_ood = float(out["ood_thresh"]), float(out["frac_ood"])
     if frac_ood > 0.5:
         st.error(f"⚠️ {frac_ood*100:.0f}% of this AOI is **out-of-distribution** — unlike the model's training "
-                 "data (10 ecosystems across 3 continents: 7 US biomes + Switzerland/Netherlands/France). "
-                 "OOD reflects novelty in **ecosystem AND AlphaEarth year** (embeddings drift yearly). Treat as "
-                 "exploratory extrapolation, *not* a validated product — the flag is **conservative by design** "
-                 "(it warns rather than silently misleads).")
+                 "data (13 ecosystems across 4 continents: US biomes + Europe + tropical Puerto Rico + boreal "
+                 "Latvia + arid Mojave). OOD reflects novelty in **ecosystem AND AlphaEarth year** (embeddings "
+                 "drift yearly). Treat as exploratory extrapolation, *not* a validated product — the flag is "
+                 "**conservative by design** (it warns rather than silently misleads).")
     elif frac_ood > 0.15:
         st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution (ecosystem and/or AEF-year novelty) — interpret with care.")
     else:
