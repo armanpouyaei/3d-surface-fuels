@@ -173,13 +173,19 @@ Benchmarked leave-one-site-out (`scripts/portable_v2_experiments.py`):
 
 | treatment | LOSO mean R² | LOSO mean Spearman | OSBS Spearman |
 |---|---|---|---|
-| v1 (raw AEF+S1) | −0.62 | +0.17 | −0.36 |
-| **v2 (per-tile standardized = domain-adapt)** | **+0.01** | **+0.30** | **+0.18** |
+| v1 (raw AEF+S1), 6 sites | −0.62 | +0.17 | −0.36 |
+| v2 (domain-adapt), 6 sites | +0.01 | +0.30 | +0.18 |
+| **v2 (domain-adapt), 10 sites** | **−0.01** | **+0.30** | **+0.43** |
 | spatial CNN (7×7 patches, tile-std) | −0.55 | +0.20 | +0.54 |
 
 - **v2 generalizes far better** to unseen ecosystems and is **sharper** (OSBS prediction CV
-  0.12 → 0.27). OOD is kept on **raw** features, so domain shift is still flagged (Amazon
-  100%, Germany 95% OOD) even though prediction uses domain-adapted features.
+  0.12 → 0.27). OOD is kept on **raw** features, so domain shift is still flagged even though
+  prediction uses domain-adapted features.
+- **Broadening to 10 sites** (added Switzerland, Netherlands, France, Everglades wetland;
+  Alaska boreal skipped — AlphaEarth coverage stops ~64°N) left the *headline* cross-ecosystem
+  R² flat (−0.01) — predicting a brand-new biome's fine structure stays hard — but **sharpened
+  the well-sampled ecosystems** (OSBS LOSO Spearman +0.18 → **+0.43**, SOAP +0.54, WREF +0.62)
+  and, crucially, **expanded honest in-distribution coverage** (see §2d).
 - **A spatial CNN did NOT beat v2** overall (mean R² −0.55, Spearman +0.20): it wins at
   OSBS/WREF but overfits at HARV/SRER/CPER — learned texture doesn't transfer cross-ecosystem
   (same data-starved lesson as the de Conto head-to-head). **Domain adaptation, not
@@ -191,9 +197,11 @@ Benchmarked leave-one-site-out (`scripts/portable_v2_experiments.py`):
 ## 2d. Global "generate anywhere" — on-demand inference (`portable.py`, dashboard tab)
 
 A **portable Stage-1 model** (`scripts/train_portable.py` → `stage1_portable.joblib`)
-trained once on **6 diverse US ecosystems** (OSBS longleaf savanna, SOAP Sierra conifer,
-CPER shortgrass steppe, WREF PNW tall conifer, SRER desert shrub, HARV eastern deciduous;
-**74 k pooled 10 m samples**) using **only global, free predictors** (AlphaEarth +
+trained once on **10 diverse ecosystems across 3 continents** (US: OSBS longleaf savanna,
+SOAP Sierra conifer, CPER shortgrass steppe, WREF PNW tall conifer, SRER desert shrub,
+HARV eastern deciduous, Everglades wetland; Europe: Switzerland temperate/foothill forest,
+Netherlands heath + Scots pine, France pre-alpine mixed; **118 k pooled 10 m samples**)
+using **only global, free predictors** (AlphaEarth +
 Sentinel-1 — *no LiDAR at inference*), each vintage-matched to its 3DEP year. The
 dashboard's **🌍 Generate anywhere** tab takes any lat/lon → fetches AEF+S1 → predicts
 30 m→1 m structure + 3D voxels, with **conformal intervals**, an **OOD flag**, a
@@ -204,17 +212,26 @@ side-by-side **FastFuels/global-baseline** panel, and a **disk cache**.
   cap 2000 m, 1 m export voxel-budgeted; UI shows the footprint pre-run.
 - **OOD on AlphaEarth bands only** (S1 availability is flaky globally; including it
   spuriously inflated the distance). Reflects novelty in ecosystem AND AEF year.
-- **The honest, important finding — cross-ecosystem transfer is hard.** Even with 6
-  ecosystems, **leave-one-site-out R² stays mostly negative** (osbs −0.19, soap −1.15,
-  cper −0.07, **wref +0.16**, srer −1.46, harv −0.40). Predicting an *unseen* ecosystem's
-  fine surface structure from spaceborne does **not** generalize well — consistent with
-  the documented ceilings (Leite 0.31, Labenski 0.27–0.41). Adding sites **broadens
-  in-distribution coverage and makes the OOD flag more meaningful** (more of the world now
-  resembles a training ecosystem), and improves in-distribution fit (74 k vs 30 k samples)
-  — but it does **not** make the model predict a brand-new ecosystem sharply. The product
-  is honestly: *grounded where the world resembles a training ecosystem, OOD-flagged
-  elsewhere.* The real path to global sharpness is many more sites (continental-scale
-  training) — the design supports it; this is a capability demo, not a solved global product.
+- **The honest, important finding — cross-ecosystem transfer is hard.** Even with 10
+  ecosystems, **leave-one-site-out R² stays ~0** (v2 mean −0.01). Predicting an *unseen*
+  ecosystem's fine surface structure from spaceborne does **not** generalize well — consistent
+  with the documented ceilings (Leite 0.31, Labenski 0.27–0.41). What broader coverage *does*
+  buy is real and measurable on two axes:
+  1. **Sharper in-distribution fit** — OSBS LOSO Spearman +0.18 → **+0.43** (SOAP +0.54,
+     WREF +0.62) as the pooled training set grew 6 → 10 sites, 74 k → 118 k samples.
+  2. **Wider honest in-distribution coverage** (`scripts/check_ood_global.py`). Adding three
+     European sites **brought temperate lowland Europe in-distribution**: Germany went from
+     **~95% OOD → 0%**, with UK 1%, Spain 0%, Netherlands 0%. The OOD guard stays honest — it
+     still flags clearly-foreign biomes (Sahara/outback/Congo 100%, Amazon 83%) **and** finer
+     within-Europe terrain shifts (alpine Switzerland/France at non-training elevations, boreal
+     Sweden 88%). Verified the logic is sound, not a false negative: at the **actual training-tile
+     centers** OOD is low (ch 0.10, fr 0.00, nl 0.00) — so the alpine flags are correct
+     discrimination, not a bug.
+
+  Net: the product is honestly *grounded where the world resembles a training ecosystem,
+  OOD-flagged elsewhere* — and "where it resembles" now spans three continents. The real path
+  to global sharpness is still many more sites (continental-scale training); the design supports
+  it. This is a capability demo with an expanding, self-aware footprint, not a solved global product.
 
 ## 3. Supporting real-data results
 

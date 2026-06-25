@@ -30,6 +30,12 @@ SITES = [  # diverse ecosystems; src/tgt EPSG + z-unit + AEF year verified per L
     {"name": "wref", "laz": "data/raw/wref_3dep.laz", "src": 6339, "tgt": 32610, "year": 2018, "z": "m"},            # PNW tall conifer WA
     {"name": "srer", "laz": "data/raw/srer_3dep.laz", "src": 6341, "tgt": 32612, "year": 2020, "z": "m"},            # desert shrub AZ
     {"name": "harv", "laz": "data/raw/harv_3dep.laz", "src": 6347, "tgt": 32618, "year": 2024, "z": "m"},            # eastern deciduous MA
+    # international + biome-gap sites (open ALS, vintage-matched to AlphaEarth) — broadens coverage to 3 continents
+    {"name": "ever", "laz": "data/raw/ever.laz", "src": 6346,  "tgt": 32617, "year": 2017, "z": "m"},               # Everglades wetland/swamp FL
+    {"name": "ch",   "laz": "data/raw/ch.las",  "src": 2056,  "tgt": 32632, "year": 2019, "z": "m"},                # Switzerland temperate/foothill forest (swissSURFACE3D)
+    {"name": "nl",   "laz": "data/raw/nl.laz",  "src": 28992, "tgt": 32631, "year": 2022, "z": "m"},                # Netherlands heath + Scots pine (AHN4)
+    {"name": "fr",   "laz": "data/raw/fr.laz",  "src": 2154,  "tgt": 32631, "year": 2024, "z": "m"},                # France pre-alpine mixed forest (IGN LiDAR HD)
+    # akf (Alaska Fairbanks boreal, EPSG 6335) intentionally omitted — AlphaEarth mirror coverage ends ~64°N (AEF fetch fails)
 ]
 
 
