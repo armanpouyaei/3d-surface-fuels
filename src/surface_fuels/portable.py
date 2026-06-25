@@ -157,6 +157,61 @@ def fastfuels_surface_aoi(out: Dict, lat: float, lon: float):
         return None
 
 
+# ── GLOBAL categorical baseline: ESA WorldCover (10 m, global) → fuel-load crosswalk ──
+# Same methodology as FastFuels (a categorical land/fuel map → representative per-class
+# load), but worldwide. Loads use representative SB40 fuel models (kg/m²) so units match
+# the US FastFuels panel. A constructed, coarse baseline — the global analog to LANDFIRE.
+WORLDCOVER_LOAD = {
+    10: FBFM40_LOAD[161],  # tree cover    -> TU1 (timber-understory)  0.829
+    20: FBFM40_LOAD[122],  # shrubland     -> GS2 (grass-shrub)        0.583
+    30: FBFM40_LOAD[102],  # grassland     -> GR2                      0.247
+    40: FBFM40_LOAD[101],  # cropland      -> GR1 (sparse/managed)     0.090
+    50: 0.0,               # built-up      -> non-burnable
+    60: 0.045,             # bare / sparse
+    70: 0.0,               # snow / ice
+    80: 0.0,               # permanent water
+    90: FBFM40_LOAD[102],  # herbaceous wetland -> grass               0.247
+    95: FBFM40_LOAD[161],  # mangrove      -> forest understory        0.829
+    100: 0.05,             # moss / lichen
+}
+
+
+def global_surface_aoi(out: Dict, lat: float, lon: float):
+    """GLOBAL categorical surface-load baseline (kg/m²) over the AOI from ESA WorldCover
+    (10 m, Planetary Computer) via the land-cover→fuel crosswalk. North-up, aligned to our
+    grid. The worldwide analog to FastFuels' LANDFIRE layer. None on failure."""
+    try:
+        import planetary_computer as pc
+        import rasterio
+        from rasterio.warp import reproject, Resampling
+        from affine import Affine
+        from pystac_client import Client
+        from pyproj import Transformer
+        ny, nx = out["pred10"].shape
+        x0, y0, res, epsg = float(out["x0"]), float(out["y0"]), float(out["res"]), int(out["epsg"])
+        tr = Transformer.from_crs(epsg, 4326, always_xy=True)
+        xs, ys = tr.transform([x0, x0 + nx * res, x0, x0 + nx * res],
+                              [y0, y0, y0 + ny * res, y0 + ny * res])
+        bbox = [min(xs), min(ys), max(xs), max(ys)]
+        cat = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
+        items = list(cat.search(collections=["esa-worldcover"], bbox=bbox).items())
+        if not items:
+            return None
+        items.sort(key=lambda it: it.properties.get("start_datetime", ""), reverse=True)  # latest map
+        cls = np.zeros((ny, nx), np.uint8)
+        dst_t = Affine(res, 0, x0, 0, -res, y0 + ny * res)
+        with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MULTIPLEX="YES"):
+            with rasterio.open(items[0].assets["map"].href) as src:
+                reproject(rasterio.band(src, 1), cls, dst_transform=dst_t, dst_crs=f"EPSG:{epsg}",
+                          resampling=Resampling.nearest, src_nodata=0, dst_nodata=0)
+        load = np.zeros((ny, nx), np.float32)
+        for c, v in WORLDCOVER_LOAD.items():
+            load[cls == c] = v
+        return load
+    except Exception:
+        return None
+
+
 # ── canonical global grid of L-metre square tiles (UTM-snapped) ───────────────
 # A click snaps to its containing tile so the AOI is canonical and deterministic —
 # the same tile always yields the same cache key (reusable, shareable downloads).

@@ -123,6 +123,14 @@ def load_ff_surface(x0, y0, res, ny, nx, epsg, lat, lon):
 
 
 @st.cache_data(show_spinner=False)
+def load_global_surface(x0, y0, res, ny, nx, epsg, lat, lon):
+    """Global categorical baseline (ESA WorldCover → fuel crosswalk) over the AOI, cached."""
+    from surface_fuels import portable
+    out = {"pred10": np.zeros((ny, nx), np.float32), "x0": x0, "y0": y0, "res": res, "epsg": epsg}
+    return portable.global_surface_aoi(out, lat, lon)
+
+
+@st.cache_data(show_spinner=False)
 def load_deconto():
     """de Conto head-to-head arrays (scripts/deconto_headtohead.py)."""
     p = os.path.join(PROC, "deconto_headtohead.npz")
@@ -288,7 +296,7 @@ def synced_heatmaps(panels):
     return fig
 
 
-def rgb_vs_structure(rgb, pred, vmax, ff=None):
+def rgb_vs_structure(rgb, pred, vmax, ff=None, ff_label="FastFuels surface"):
     """Equal-size panels: real Esri satellite · our predicted structure · (optional)
     FastFuels surface load. All arrays are drawn as go.Image on the SAME (ny,nx) grid so
     every panel is identical size. ``pred`` is row 0 = south (flip to north-up); ``rgb``
@@ -310,7 +318,7 @@ def rgb_vs_structure(rgb, pred, vmax, ff=None):
               (f"Our structure · 0–{vmax:.2f} kg/m²", colorize(pred, vmax, True))]
     if ff is not None:
         ffmax = float(np.percentile(ff[ff > 0], 98)) if (ff > 0).any() else 1.0
-        panels.append((f"FastFuels surface · 0–{ffmax:.1f} kg/m²", colorize(ff, ffmax, False)))
+        panels.append((f"{ff_label} · 0–{ffmax:.1f} kg/m²", colorize(ff, ffmax, False)))
     fig = make_subplots(rows=1, cols=len(panels), horizontal_spacing=0.03,
                         subplot_titles=[p[0] for p in panels])
     for i, (_, img) in enumerate(panels, start=1):
@@ -740,23 +748,34 @@ elif source.startswith("🌍"):
     ny0, nx0 = pred.shape
     west, south = float(out["x0"]), float(out["y0"])
     east, north = west + nx0 * out["res"], south + ny0 * out["res"]
-    with st.spinner("Fetching Esri satellite + FastFuels (LANDFIRE) for the AOI…"):
+    args = (west, south, float(out["res"]), ny0, nx0, int(out["epsg"]), float(lat), float(lon))
+    with st.spinner("Fetching Esri satellite + reference fuel layer for the AOI…"):
         rgb = load_aoi_basemap(west, south, east, north, int(out["epsg"]))
-        ff = load_ff_surface(west, south, float(out["res"]), ny0, nx0, int(out["epsg"]), float(lat), float(lon))
-    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6), ff),
+        ff = load_ff_surface(*args)                       # real FastFuels (LANDFIRE) — US only
+        if ff is not None:
+            ff_label, ff_src = "FastFuels surface (LANDFIRE→SB40)", "fastfuels"
+        else:                                             # global fallback baseline
+            ff = load_global_surface(*args)
+            ff_label, ff_src = "Global baseline (WorldCover→fuel)", "worldcover"
+    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6), ff, ff_label),
                     use_container_width=True)
     ours_cv = float(pred.std() / (pred.mean() + 1e-9))
-    if ff is not None:
-        ff_cv = float(ff.std() / (ff.mean() + 1e-9))
-        st.caption(f"Satellite · **our structure (CV {ours_cv:.2f})** · **FastFuels surface (CV {ff_cv:.2f})**. "
-                   "FastFuels is LANDFIRE FBFM40 → SB40 load — *uniform per 30 m fuel-model class* (blocky, low CV). "
-                   "Where ours shows fine sub-30 m detail the satellite supports and FastFuels can't, we're adding "
-                   "value. (Different quantities — our near-ground structure vs FastFuels total load — so compare "
-                   "the *spatial pattern*, not absolute values.)")
+    if ff is None:
+        st.caption(f"Satellite · our predicted structure (CV {ours_cv:.2f}). No reference fuel layer available "
+                   "for this AOI (offline or unsupported region).")
     else:
-        st.caption(f"Satellite · our predicted structure (CV {ours_cv:.2f}). **FastFuels comparison unavailable "
-                   "here** — its surface layer is LANDFIRE FBFM40, which is **US-only**. Pick a US location to "
-                   "see the head-to-head.")
+        ff_cv = float(ff.std() / (ff.mean() + 1e-9))
+        if ff_src == "fastfuels":
+            ref = ("**FastFuels** (LANDFIRE FBFM40 → SB40 load) — the real US incumbent, *uniform per 30 m "
+                   "fuel-model class*")
+        else:
+            ref = ("a **global categorical baseline** (ESA WorldCover 10 m → fuel crosswalk; the worldwide "
+                   "analog to FastFuels' LANDFIRE method, since FastFuels itself is US-only) — *coarse, "
+                   "land-cover-class-uniform*")
+        st.caption(f"Satellite · **our structure (CV {ours_cv:.2f})** · **{ff_label} (CV {ff_cv:.2f})**. "
+                   f"The reference is {ref}. Where ours shows fine sub-30 m detail the satellite supports and the "
+                   "blocky reference can't, we're adding value. (Different quantities — our near-ground structure "
+                   "vs reference total load — so compare the *spatial pattern*, not absolute values.)")
 
     st.plotly_chart(voxel_figure(portable.display_grid(pred, out["res"]), threshold, opacity,
                                  f"Predicted 3D structure @ ({lat:.3f}, {lon:.3f})"), use_container_width=True)
