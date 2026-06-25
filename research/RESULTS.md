@@ -233,6 +233,64 @@ side-by-side **FastFuels/global-baseline** panel, and a **disk cache**.
   to global sharpness is still many more sites (continental-scale training); the design supports
   it. This is a capability demo with an expanding, self-aware footprint, not a solved global product.
 
+## 2f. Cracking cross-ecosystem transfer — diagnosis + the target fix
+
+The earlier "cross-ecosystem transfer is hard (LOSO R²~0)" conclusion was **partly an
+artifact of how the target was built**, not a pure information limit. Diagnosis
+(`scripts/diagnose_transfer.py`) on the 10 cached sites:
+
+- **The target was renormalized to mean 0.6 per site** (`train_portable.py`), so the
+  **between-biome variance fraction η² = 0.007** — i.e. the cross-biome signal was *erased
+  by construction*. A desert and a rainforest both had target-mean 0.6.
+- Yet **AlphaEarth classifies which of 10 biomes a pixel is in with 100 % accuracy** — the
+  biome signal is fully present in the features; we just forbade the target from carrying it.
+
+So we separated the two transfer problems and tested candidate targets
+(`scripts/eval_targets.py`, leave-one-site-out, decomposed):
+
+- **GLOBAL R²** (vs grand mean) = place an *unseen* biome at the right **absolute** understory
+  level — what a global product needs (FastFuels does this with a categorical lookup).
+- **WITHIN R²** (vs the held-out site's own mean) = fine heterogeneity *inside* an unseen biome
+  — the genuinely hard, sensing-limited residual.
+
+| target | method | GLOBAL R² | WITHIN R² | BETWEEN R² | ρ(target,density) |
+|---|---|---|---|---|---|
+| old (mean-0.6 normalized) | tile-std | +0.04 | −0.03 | −2.5 | 0.87 |
+| frac (near-ground fraction) | raw | +0.02 | −0.51 | −0.31 | 0.78 |
+| **vertical occupancy `occ_vert`** | **raw** | **+0.44** | −1.4 | **+0.62** | 0.37 |
+| occ_vert | tile-std | +0.08 | −9.3 | −0.03 | 0.37 |
+
+**Findings:**
+1. **Between-biome transfer is solved.** With a *vertical-occupancy* target (fraction of 0.5 m
+   height-bins in 0.15–4 m that contain a return) the model places an unseen biome at the right
+   absolute level: **GLOBAL R² 0.44, BETWEEN R² 0.62** (was ~0). Continuous-from-embeddings,
+   so it beats FastFuels' categorical-per-class surface lookup *across* classes too.
+2. **Domain adaptation (v2 tile-std) is the WRONG move for the global goal** — it removes the
+   per-biome offset and craters GLOBAL/BETWEEN R² (0.44→0.08 / 0.62→−0.03). (It was right only
+   for the old within-site-normalized target; see §2e. The global product uses **raw** features.)
+3. **Density-artifact control passed** (`scripts/rederive_thinned.py` → re-eval): thinning every
+   site to a common 2 pts/m² before computing occupancy keeps **BETWEEN R² 0.59 / GLOBAL R² 0.30**
+   (vs 0.62 / 0.44 native). The between-biome skill barely drops, so it is **real vegetation, not
+   a LiDAR-density artifact** — the small global-R² drop is exactly the artifact portion, excised.
+
+**Still open — within-biome heterogeneity in an UNSEEN biome (WITHIN R² < 0).** This is the true
+sensing limit: optical + C-band SAR don't see under canopy. Note within-biome heterogeneity in a
+*seen* ecosystem already works (the validated thesis, §1: within-block R² 0.27 vs FastFuels 0).
+Closing the unseen-within gap is the next frontier — the lever is physical sub-canopy data
+(L-band SAR, global canopy height, GEDI), not more modelling.
+
+This is **empirically confirmed, not assumed** (`scripts/method_experiments.py`, occ_thin target):
+
+| method (no new data) | GLOBAL R² | WITHIN R² | BETWEEN R² |
+|---|---|---|---|
+| M0 point AEF+S1 (baseline) | +0.31 | −1.21 | +0.65 |
+| M1 + 3×3 spatial texture | +0.35 | −1.67 | +0.63 |
+| M2 2-stage (biome + residual) | +0.32 | −1.78 | +0.66 |
+
+Spatial context lifts GLOBAL slightly (0.31→0.35) but **no method moves WITHIN R² off the floor** —
+so the unseen-within residual is **information-limited**: the next gain must come from sensors that
+see under canopy (L-band SAR, canopy height, GEDI), not from a better model or more spatial context.
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only
