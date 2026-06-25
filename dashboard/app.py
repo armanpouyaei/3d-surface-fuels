@@ -330,9 +330,10 @@ def rgb_vs_structure(rgb, pred, vmax, ff=None, ff_label="FastFuels surface"):
                         subplot_titles=[p[0] for p in panels])
     for i, (_, img) in enumerate(panels, start=1):
         fig.add_trace(go.Image(z=img), row=1, col=i)
-    fig.update_xaxes(showticklabels=False)
-    fig.update_yaxes(showticklabels=False)
-    fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0))
+    # synchronized zoom/pan: all panels share one x/y range (same (ny,nx) grid) — zoom one, all move
+    fig.update_xaxes(showticklabels=False, matches="x")
+    fig.update_yaxes(showticklabels=False, matches="y")
+    fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0), dragmode="zoom")
     return fig
 
 

@@ -39,6 +39,9 @@ SITES = [  # diverse ecosystems; src/tgt EPSG + z-unit + AEF year verified per L
     {"name": "pr",     "laz": "data/raw/pr.laz",     "src": 6566, "tgt": 32620, "year": 2018, "z": "m"},            # tropical/subtropical broadleaf, Puerto Rico 3DEP
     {"name": "lva",    "laz": "data/raw/lva.las",    "src": 3059, "tgt": 32635, "year": 2018, "z": "m"},            # boreal/hemiboreal conifer, Latvia LGIA
     {"name": "mojave", "laz": "data/raw/mojave.laz", "src": 6350, "tgt": 32611, "year": 2019, "z": "m"},            # arid Mojave desert scrub, 3DEP
+    # equatorial rainforest (two continents) — bring the tropics in-distribution
+    {"name": "amz",    "laz": "data/raw/amz.laz",    "src": 31980, "tgt": 32720, "year": 2017, "z": "m"},           # Amazon terra-firme, Reserva Ducke (ORNL DAAC)
+    {"name": "borneo", "laz": "data/raw/borneo.las", "src": 32650, "tgt": 32650, "year": 2020, "z": "m"},           # Bornean dipterocarp, Danum Valley (NERC CEDA)
     # akf (Alaska Fairbanks boreal, EPSG 6335) intentionally omitted — AlphaEarth mirror coverage ends ~64°N (AEF fetch fails)
 ]
 

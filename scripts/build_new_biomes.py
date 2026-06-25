@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from train_portable import SITES, ROOT, site_samples  # noqa: E402
 
-NEW = {"pr", "lva", "mojave"}
+NEW = {"pr", "lva", "mojave", "amz", "borneo"}   # rainforest tiles added; cached ones are skipped
 
 for s in SITES:
     if s["name"] not in NEW:
