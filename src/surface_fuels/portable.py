@@ -78,11 +78,52 @@ def train(X: np.ndarray, y: np.ndarray, sites: Optional[list] = None,
     return out_path
 
 
-def load() -> Optional[Dict]:
-    if not os.path.exists(MODEL_PATH):
-        return None
+MODEL_V2_PATH = os.path.join(PROC, "stage1_portable_v2.joblib")
+MODELS = {"v1": MODEL_PATH, "v2": MODEL_V2_PATH}
+
+
+def _tile_std_aef(X, n_aef=64):
+    """Per-tile (per-AOI) channel-wise standardization of the AlphaEarth columns —
+    the v2 domain-adaptation that lets the relationship transfer across ecosystems."""
+    Xs = X.copy()
+    a = Xs[:, :n_aef]
+    Xs[:, :n_aef] = (a - a.mean(0)) / (a.std(0) + 1e-9)
+    return Xs
+
+
+def train_v2(grids: Dict, sites: list, out_path: str = MODEL_V2_PATH, quantiles=g30.QUANTILES) -> str:
+    """v2: quantile GBM on PER-TILE-STANDARDIZED AlphaEarth (+ raw S1) for cross-ecosystem
+    generalization; OOD kept on RAW features so domain shift is still flagged. ``grids`` maps
+    site -> {target, aef, s1, valid} (the cached per-site 2D grids)."""
     import joblib
-    return joblib.load(MODEL_PATH)
+    Xstd_l, Xraw_l, y_l = [], [], []
+    for n in sites:
+        g = grids[n]
+        cols = [np.nan_to_num(g["aef"][i]).ravel() for i in range(64)]
+        cols += [np.nan_to_num(g["s1"][0]).ravel(), np.nan_to_num(g["s1"][1]).ravel()]
+        X = np.stack(cols, 1).astype(np.float32)[g["valid"].ravel()]
+        Xraw_l.append(X); Xstd_l.append(_tile_std_aef(X)); y_l.append(g["target"].ravel()[g["valid"].ravel()])
+    Xstd, Xraw, y = np.vstack(Xstd_l), np.vstack(Xraw_l), np.concatenate(y_l)
+    rng = np.random.default_rng(0)
+    cal = rng.random(len(y)) < 0.25
+    models = g30._fit_quantiles(Xstd[~cal], y[~cal], quantiles)
+    delta = g30._cqr_delta(models, Xstd[cal], y[cal], quantiles[0], quantiles[-1])
+    mu, sd = Xraw.mean(0), Xraw.std(0) + 1e-9            # OOD on RAW features (flags domain shift)
+    Zaef = ((Xraw - mu) / sd)[:, :64]
+    centroid = Zaef.mean(0)
+    ood = np.sqrt(((Zaef - centroid) ** 2).sum(1))
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    joblib.dump({"models": models, "quantiles": quantiles, "delta": float(delta), "tile_std": True,
+                 "mu": mu, "sd": sd, "centroid": centroid, "n_aef": 64,
+                 "ood_thresh": float(np.percentile(ood, 95)), "feats": FEATS,
+                 "sites": sites, "n_train": int(len(y))}, out_path)
+    return out_path
+
+
+def load(version: str = "v1") -> Optional[Dict]:
+    import joblib
+    p = MODELS.get(version, MODEL_PATH)
+    return joblib.load(p) if os.path.exists(p) else None
 
 
 # ── geometry + features for an arbitrary AOI ──────────────────────────────────
@@ -311,32 +352,34 @@ def _cache_key(lat, lon, size, year, res):
 
 
 def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
-                res: float = 10.0, use_cache: bool = True) -> Dict:
+                res: float = 10.0, use_cache: bool = True, version: str = "v1") -> Dict:
     """Predict surface-fuel structure over a global AOI. Returns maps + OOD + provenance.
-    Cached to disk by (lat, lon, size, year, res)."""
+    ``version`` selects the model ('v1' raw, 'v2' domain-adapted/tile-std). Cached to disk
+    by (lat, lon, size, year, res, version)."""
     if size > MAX_AOI_M:
         raise ValueError(f"AOI {size:.0f} m exceeds the {MAX_AOI_M:.0f} m memory-safety cap "
                          "(pick a smaller AOI; tile larger areas).")
-    cpath = os.path.join(CACHE_DIR, f"aoi_{_cache_key(lat, lon, size, year, res)}.npz")
+    cpath = os.path.join(CACHE_DIR, f"aoi_{_cache_key(lat, lon, size, year, res)}_{version}.npz")
     if use_cache and os.path.exists(cpath):
         d = np.load(cpath, allow_pickle=True)
         out = {k: (d[k].item() if d[k].ndim == 0 else d[k]) for k in d.files}
         out["cached"] = True
         return out
-    m = load()
+    m = load(version)
     if m is None:
-        raise RuntimeError("Portable model not found — run `python scripts/train_portable.py` first.")
+        raise RuntimeError(f"Portable model '{version}' not found — train it first.")
     grid, epsg = _aoi_grid(lat, lon, size, res)
     X, (ny, nx), has_s1 = _features(grid, year)
     if X is None:
         raise RuntimeError(f"AlphaEarth unavailable for {year} at ({lat:.3f},{lon:.3f}). "
                            "Try a year in 2017-2024.")
     qs = m["quantiles"]
-    med = m["models"][qs[len(qs) // 2]].predict(X)
-    lo = m["models"][qs[0]].predict(X) - m["delta"]
-    hi = m["models"][qs[-1]].predict(X) + m["delta"]
     n_aef = m.get("n_aef", 64)
-    Zaef = ((X - m["mu"]) / m["sd"])[:, :n_aef]      # OOD on AlphaEarth bands only (robust)
+    Xp = _tile_std_aef(X, n_aef) if m.get("tile_std") else X   # v2 domain adaptation
+    med = m["models"][qs[len(qs) // 2]].predict(Xp)
+    lo = m["models"][qs[0]].predict(Xp) - m["delta"]
+    hi = m["models"][qs[-1]].predict(Xp) + m["delta"]
+    Zaef = ((X - m["mu"]) / m["sd"])[:, :n_aef]      # OOD on RAW AlphaEarth bands (flags domain shift)
     ood = np.sqrt(((Zaef - m["centroid"]) ** 2).sum(1))
     pred10 = np.clip(med, 0, None).reshape(ny, nx)
     out = {
@@ -346,7 +389,7 @@ def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
         "ood": ood.reshape(ny, nx), "ood_thresh": float(m["ood_thresh"]),
         "epsg": epsg, "x0": grid.georef.x0, "y0": grid.georef.y0, "res": res,
         "lat": lat, "lon": lon, "size": size, "year": year, "has_s1": has_s1,
-        "frac_ood": float((ood > m["ood_thresh"]).mean()),
+        "frac_ood": float((ood > m["ood_thresh"]).mean()), "version": version,
     }
     os.makedirs(CACHE_DIR, exist_ok=True)
     np.savez_compressed(cpath, **out)

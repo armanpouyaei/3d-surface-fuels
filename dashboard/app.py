@@ -667,6 +667,10 @@ elif source.startswith("🌍"):
                                 help="Training vintages: OSBS 2018, SOAP 2022. Off-vintage years read as OOD.")
         size = st.slider("AOI tile size (m)", 400, int(portable.MAX_AOI_M), 1000, step=100,
                          help="Side of each canonical grid tile. Defines the fixed global tiling + cache.")
+        mver = st.radio("Model", ["v2 (domain-adapted)", "v1 (baseline)"], index=0,
+                        help="v2 standardizes AlphaEarth per-tile → generalizes far better to unseen "
+                             "ecosystems (leave-one-site-out R² −0.62→~0). v1 is the raw baseline.")
+        model_version = "v2" if mver.startswith("v2") else "v1"
         ZMIN = 13
 
     # Robust st_folium handling. KEY INSIGHT: never pass center/zoom to st_folium (those
@@ -722,7 +726,8 @@ elif source.startswith("🌍"):
     if go_btn:
         try:
             with st.spinner(f"Fetching AlphaEarth {year} + Sentinel-1 for ({lat:.3f}, {lon:.3f})…"):
-                st.session_state["aoi"] = portable.predict_aoi(lat, lon, float(size), int(year))
+                st.session_state["aoi"] = portable.predict_aoi(lat, lon, float(size), int(year),
+                                                               version=model_version)
         except Exception as e:
             st.error(f"Could not generate: {e}")
     out = st.session_state.get("aoi")
@@ -741,9 +746,9 @@ elif source.startswith("🌍"):
         st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution (ecosystem and/or AEF-year novelty) — interpret with care.")
     else:
         st.success("In-distribution: this AOI + year resembles the training data — most confidence here.")
-    st.caption(f"{'⚡ cached' if out.get('cached') else '🛰️ freshly generated'} · AlphaEarth {out['year']} · "
-               f"{'with' if out.get('has_s1') else 'no'} Sentinel-1 · EPSG:{int(out['epsg'])} · "
-               "*predicted* surface structure — no local truth here, so read the uncertainty + OOD maps.")
+    st.caption(f"{'⚡ cached' if out.get('cached') else '🛰️ freshly generated'} · model **{out.get('version','v1')}** · "
+               f"AlphaEarth {out['year']} · {'with' if out.get('has_s1') else 'no'} Sentinel-1 · "
+               f"EPSG:{int(out['epsg'])} · *predicted* surface structure — no local truth here, read uncertainty + OOD.")
 
     # satellite RGB · our structure · FastFuels surface (the "are we adding value?" check)
     ny0, nx0 = pred.shape
