@@ -192,7 +192,10 @@ Benchmarked leave-one-site-out (`scripts/portable_v2_experiments.py`):
   architecture, is the generalization lever.**
 - **Clay encoder deferred:** `claymodel` 1.5 needs Python ≥3.11 (env is 3.9) + pins torch 2.4,
   and overlaps AlphaEarth — a separate-env follow-up.
-- v1 retained (`stage1_portable_v1.joblib`); dashboard has a **v1/v2 selector** (v2 default).
+- v1 retained (`stage1_portable_v1.joblib`); dashboard has a **v1/v2/v3 selector**. **v3 is now the
+  default** — the cracked cross-ecosystem config (§2f: vertical-occupancy target + AEF+S1+L-band PALSAR,
+  raw), shipped to the "generate anywhere" tab and verified live across biomes (Germany forest occ 0.80
+  / 0% OOD, savanna 0.55, Sahara 0.41 / 100% OOD, Amazon 0.79 / 83% OOD). See §2f.
 
 ## 2d. Global "generate anywhere" — on-demand inference (`portable.py`, dashboard tab)
 
