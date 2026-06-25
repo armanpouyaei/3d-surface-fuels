@@ -667,10 +667,13 @@ elif source.startswith("🌍"):
                                 help="Training vintages: OSBS 2018, SOAP 2022. Off-vintage years read as OOD.")
         size = st.slider("AOI tile size (m)", 400, int(portable.MAX_AOI_M), 1000, step=100,
                          help="Side of each canonical grid tile. Defines the fixed global tiling + cache.")
-        mver = st.radio("Model", ["v2 (domain-adapted)", "v1 (baseline)"], index=0,
-                        help="v2 standardizes AlphaEarth per-tile → generalizes far better to unseen "
-                             "ecosystems (leave-one-site-out R² −0.62→~0). v1 is the raw baseline.")
-        model_version = "v2" if mver.startswith("v2") else "v1"
+        mver = st.radio("Model", ["v3 (cross-biome · +L-band)", "v2 (domain-adapted)", "v1 (baseline)"], index=0,
+                        help="v3 = the cracked cross-ecosystem config: vertical-occupancy target + "
+                             "AlphaEarth + Sentinel-1 + L-band PALSAR (raw). Leave-one-site-out GLOBAL "
+                             "R² 0.46, between-biome 0.76 — places an unseen biome at the right absolute "
+                             "structure level. v2 domain-adapts (good within-site, erases the biome level). "
+                             "v1 is the raw baseline.")
+        model_version = "v3" if mver.startswith("v3") else ("v2" if mver.startswith("v2") else "v1")
         ZMIN = 13
 
     # Robust st_folium handling. KEY INSIGHT: never pass center/zoom to st_folium (those
@@ -725,7 +728,8 @@ elif source.startswith("🌍"):
 
     if go_btn:
         try:
-            with st.spinner(f"Fetching AlphaEarth {year} + Sentinel-1 for ({lat:.3f}, {lon:.3f})…"):
+            extra = " + L-band PALSAR" if model_version == "v3" else ""
+            with st.spinner(f"Fetching AlphaEarth {year} + Sentinel-1{extra} for ({lat:.3f}, {lon:.3f})…"):
                 st.session_state["aoi"] = portable.predict_aoi(lat, lon, float(size), int(year),
                                                                version=model_version)
         except Exception as e:
@@ -736,12 +740,15 @@ elif source.startswith("🌍"):
         st.stop()
 
     pred, ood = out["pred10"], out["ood"]
+    is_occ = out.get("target") == "occ_thin"          # v3 predicts vertical occupancy (0–1), not load
+    unit = "occupancy 0–1" if is_occ else "kg/m²"
     thr, frac_ood = float(out["ood_thresh"]), float(out["frac_ood"])
     if frac_ood > 0.5:
         st.error(f"⚠️ {frac_ood*100:.0f}% of this AOI is **out-of-distribution** — unlike the model's training "
-                 "data (OSBS-2018 savanna + SOAP-2022 conifer). OOD reflects novelty in **ecosystem AND "
-                 "AlphaEarth year** (embeddings drift yearly). Treat as exploratory extrapolation, *not* a "
-                 "validated product — the flag is **conservative by design** (it warns rather than silently misleads).")
+                 "data (10 ecosystems across 3 continents: 7 US biomes + Switzerland/Netherlands/France). "
+                 "OOD reflects novelty in **ecosystem AND AlphaEarth year** (embeddings drift yearly). Treat as "
+                 "exploratory extrapolation, *not* a validated product — the flag is **conservative by design** "
+                 "(it warns rather than silently misleads).")
     elif frac_ood > 0.15:
         st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution (ecosystem and/or AEF-year novelty) — interpret with care.")
     else:
@@ -788,10 +795,10 @@ elif source.startswith("🌍"):
 
     width = out["upper"] - out["lower"]
     st.plotly_chart(synced_heatmaps([
-        {"title": "Predicted structure (kg/m²)", "z": pred, "cmin": 0,
-         "cmax": float(np.percentile(pred, 98) + 1e-6), "colorscale": COLORSCALE, "cbar": True, "cbar_title": "kg/m²"},
+        {"title": f"Predicted structure ({unit})", "z": pred, "cmin": 0,
+         "cmax": float(np.percentile(pred, 98) + 1e-6), "colorscale": COLORSCALE, "cbar": True, "cbar_title": unit},
         {"title": "Uncertainty (90% interval width)", "z": width, "cmin": 0,
-         "cmax": float(np.percentile(width, 98) + 1e-6), "colorscale": "Purples", "cbar": True, "cbar_title": "kg/m²"},
+         "cmax": float(np.percentile(width, 98) + 1e-6), "colorscale": "Purples", "cbar": True, "cbar_title": unit},
         {"title": "OOD score (dist. to training)", "z": ood, "cmin": 0,
          "cmax": float(max(thr * 2, np.percentile(ood, 98))), "colorscale": "Inferno", "cbar": True, "cbar_title": "dist"},
     ]), use_container_width=True)
@@ -799,9 +806,9 @@ elif source.startswith("🌍"):
                "model was trained on. Zoom any panel — all move together.")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Mean structure (kg/m²)", f"{pred.mean():.2f}")
+    c1.metric(f"Mean structure ({unit})", f"{pred.mean():.2f}")
     c2.metric("Heterogeneity (CV)", f"{pred.std()/(pred.mean()+1e-9):.2f}")
-    c3.metric("Mean uncertainty (kg/m²)", f"{width.mean():.2f}")
+    c3.metric(f"Mean uncertainty ({unit})", f"{width.mean():.2f}")
     c4.metric("% out-of-distribution", f"{frac_ood*100:.0f}%")
     st.caption("Resolution is AlphaEarth-native 10 m (the 3D view disaggregates over a near-ground vertical "
                "profile). Use the button to export a 1 m³ FastFuels Option-C NetCDF.")

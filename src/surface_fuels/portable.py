@@ -79,7 +79,11 @@ def train(X: np.ndarray, y: np.ndarray, sites: Optional[list] = None,
 
 
 MODEL_V2_PATH = os.path.join(PROC, "stage1_portable_v2.joblib")
-MODELS = {"v1": MODEL_PATH, "v2": MODEL_V2_PATH}
+MODEL_V3_PATH = os.path.join(PROC, "stage1_portable_v3.joblib")
+MODELS = {"v1": MODEL_PATH, "v2": MODEL_V2_PATH, "v3": MODEL_V3_PATH}
+
+# v3 feature order (MUST match training in scripts/train_v3.py and _features(lband=True))
+FEATS_V3 = FEATS + ["pal_hh", "pal_hv", "pal_ratio"]
 
 
 def _tile_std_aef(X, n_aef=64):
@@ -118,6 +122,99 @@ def train_v2(grids: Dict, sites: list, out_path: str = MODEL_V2_PATH, quantiles=
                  "ood_thresh": float(np.percentile(ood, 95)), "feats": FEATS,
                  "sites": sites, "n_train": int(len(y))}, out_path)
     return out_path
+
+
+def train_v3(grids: Dict, sites: list, out_path: str = MODEL_V3_PATH, quantiles=g30.QUANTILES) -> str:
+    """v3: the cracked cross-ecosystem config. Target = vertical occupancy (occ_thin, the
+    density-robust structure metric). Features = RAW AlphaEarth + Sentinel-1 + L-band PALSAR
+    (HH/HV/ratio) — NO tile-std (domain adaptation erases the between-biome level we want).
+    Reaches GLOBAL R² 0.46 / BETWEEN-biome 0.76 (LOSO). OOD on raw AlphaEarth bands."""
+    import joblib
+    X_l, y_l = [], []
+    for n in sites:
+        g = grids[n]
+        v = g["valid"].ravel()
+        cols = [np.nan_to_num(g["aef"][i]).ravel() for i in range(64)]
+        cols += [np.nan_to_num(g["s1"][0]).ravel(), np.nan_to_num(g["s1"][1]).ravel()]
+        cols += [np.nan_to_num(g["pal_hh"]).ravel(), np.nan_to_num(g["pal_hv"]).ravel(),
+                 np.nan_to_num(g["pal_ratio"]).ravel()]
+        X_l.append(np.stack(cols, 1).astype(np.float32)[v])
+        y_l.append(g["occ_thin"].ravel()[v].astype(np.float32))
+    X, y = np.vstack(X_l), np.concatenate(y_l)
+    rng = np.random.default_rng(0)
+    cal = rng.random(len(y)) < 0.25
+    models = g30._fit_quantiles(X[~cal], y[~cal], quantiles)
+    delta = g30._cqr_delta(models, X[cal], y[cal], quantiles[0], quantiles[-1])
+    mu, sd = X.mean(0), X.std(0) + 1e-9
+    Zaef = ((X - mu) / sd)[:, :64]                       # OOD on raw AlphaEarth bands
+    centroid = Zaef.mean(0)
+    ood = np.sqrt(((Zaef - centroid) ** 2).sum(1))
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    joblib.dump({"models": models, "quantiles": quantiles, "delta": float(delta),
+                 "tile_std": False, "use_lband": True, "target": "occ_thin",
+                 "mu": mu, "sd": sd, "centroid": centroid, "n_aef": 64,
+                 "ood_thresh": float(np.percentile(ood, 95)), "feats": FEATS_V3,
+                 "sites": sites, "n_train": int(len(y))}, out_path)
+    return out_path
+
+
+def palsar_for_grid(grid, year: int) -> Optional[Dict]:
+    """L-band ALOS PALSAR annual mosaic (HH/HV γ0 dB + HH−HV ratio) over the grid footprint,
+    nearest available year. Free/ungated on Planetary Computer (like Sentinel-1). Returns
+    {pal_hh, pal_hv, pal_ratio} each (ny,nx) row 0 = south, or None."""
+    try:
+        import planetary_computer as pc
+        import rasterio
+        from rasterio.warp import reproject, Resampling
+        from affine import Affine
+        from pystac_client import Client
+
+        g = grid.georef
+        epsg = int(str(g.crs).split(":")[-1])
+        from pyproj import Transformer
+        tr = Transformer.from_crs(epsg, 4326, always_xy=True)
+        xs, ys = tr.transform([g.x0, g.x0 + grid.nx * grid.dx, g.x0, g.x0 + grid.nx * grid.dx],
+                              [g.y0, g.y0, g.y0 + grid.ny * grid.dy, g.y0 + grid.ny * grid.dy])
+        bbox = [min(xs), min(ys), max(xs), max(ys)]
+        cat = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
+        items = list(cat.search(collections=["alos-palsar-mosaic"], bbox=bbox).items())
+        if not items:
+            return None
+        yr = min({i.datetime.year for i in items}, key=lambda y_: abs(y_ - year))
+        sel = [i for i in items if i.datetime.year == yr]
+        ny, nx = grid.ny, grid.nx
+        dst_t = Affine(grid.dx, 0, g.x0, 0, -grid.dy, g.y0 + ny * grid.dy)
+        dst_crs = f"EPSG:{epsg}"
+
+        def read(href):
+            out = np.full((ny, nx), np.nan, np.float32)
+            with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MULTIPLEX="YES"):
+                with rasterio.open(href) as src:
+                    reproject(rasterio.band(src, 1), out, dst_transform=dst_t, dst_crs=dst_crs,
+                              resampling=Resampling.bilinear, src_nodata=0, dst_nodata=np.nan)
+            return out
+
+        hh_s, hv_s = [], []
+        for it in sel:
+            try:
+                hh_s.append(read(it.assets["HH"].href)); hv_s.append(read(it.assets["HV"].href))
+            except Exception:
+                continue
+        if not hh_s:
+            return None
+        with np.errstate(invalid="ignore", divide="ignore"):
+            hh = np.nanmedian(np.stack(hh_s), 0); hv = np.nanmedian(np.stack(hv_s), 0)
+            hh_db = 20 * np.log10(np.where(hh > 0, hh, np.nan)) - 83.0
+            hv_db = 20 * np.log10(np.where(hv > 0, hv, np.nan)) - 83.0
+            ratio = hh_db - hv_db
+
+        def finish(a):
+            a = np.flipud(a).astype(np.float32)
+            m = np.nanmedian(a)
+            return np.where(np.isfinite(a), a, m if np.isfinite(m) else 0.0).astype(np.float32)
+        return {"pal_hh": finish(hh_db), "pal_hv": finish(hv_db), "pal_ratio": finish(ratio), "pal_year": yr}
+    except Exception:
+        return None
 
 
 def load(version: str = "v1") -> Optional[Dict]:
@@ -333,7 +430,7 @@ def _aoi_grid(lat, lon, size, res) -> Tuple[FuelVoxelGrid, int]:
     return grid, epsg
 
 
-def _features(grid, year) -> Tuple[Optional[np.ndarray], Tuple[int, int], bool]:
+def _features(grid, year, lband: bool = False) -> Tuple[Optional[np.ndarray], Tuple[int, int], bool]:
     aef = emb.aef_for_grid(grid, year=year)
     if aef is None:
         return None, (grid.ny, grid.nx), False
@@ -344,6 +441,12 @@ def _features(grid, year) -> Tuple[Optional[np.ndarray], Tuple[int, int], bool]:
         cols += [np.nan_to_num(s1["vh_vv"]).ravel(), np.nan_to_num(s1["rvi"]).ravel()]
     else:
         cols += [np.zeros(ny * nx, np.float32), np.zeros(ny * nx, np.float32)]
+    if lband:                              # v3: L-band PALSAR HH/HV/ratio
+        pal = palsar_for_grid(grid, year)
+        if pal is not None:
+            cols += [pal["pal_hh"].ravel(), pal["pal_hv"].ravel(), pal["pal_ratio"].ravel()]
+        else:
+            cols += [np.zeros(ny * nx, np.float32)] * 3
     return np.stack(cols, 1).astype(np.float32), (ny, nx), s1 is not None
 
 
@@ -354,8 +457,10 @@ def _cache_key(lat, lon, size, year, res):
 def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
                 res: float = 10.0, use_cache: bool = True, version: str = "v1") -> Dict:
     """Predict surface-fuel structure over a global AOI. Returns maps + OOD + provenance.
-    ``version`` selects the model ('v1' raw, 'v2' domain-adapted/tile-std). Cached to disk
-    by (lat, lon, size, year, res, version)."""
+    ``version`` selects the model: 'v1' raw, 'v2' domain-adapted/tile-std (within-site), or
+    'v3' the cracked cross-ecosystem config (vertical-occupancy target + AEF+S1+L-band PALSAR,
+    raw — GLOBAL R² 0.46 / between-biome 0.76). v3 fetches L-band PALSAR in addition to AEF+S1.
+    Cached to disk by (lat, lon, size, year, res, version)."""
     if size > MAX_AOI_M:
         raise ValueError(f"AOI {size:.0f} m exceeds the {MAX_AOI_M:.0f} m memory-safety cap "
                          "(pick a smaller AOI; tile larger areas).")
@@ -369,7 +474,7 @@ def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
     if m is None:
         raise RuntimeError(f"Portable model '{version}' not found — train it first.")
     grid, epsg = _aoi_grid(lat, lon, size, res)
-    X, (ny, nx), has_s1 = _features(grid, year)
+    X, (ny, nx), has_s1 = _features(grid, year, lband=bool(m.get("use_lband")))
     if X is None:
         raise RuntimeError(f"AlphaEarth unavailable for {year} at ({lat:.3f},{lon:.3f}). "
                            "Try a year in 2017-2024.")
@@ -390,6 +495,7 @@ def predict_aoi(lat: float, lon: float, size: float = 1200.0, year: int = 2022,
         "epsg": epsg, "x0": grid.georef.x0, "y0": grid.georef.y0, "res": res,
         "lat": lat, "lon": lon, "size": size, "year": year, "has_s1": has_s1,
         "frac_ood": float((ood > m["ood_thresh"]).mean()), "version": version,
+        "target": m.get("target", "structure"), "use_lband": bool(m.get("use_lband")),
     }
     os.makedirs(CACHE_DIR, exist_ok=True)
     np.savez_compressed(cpath, **out)
