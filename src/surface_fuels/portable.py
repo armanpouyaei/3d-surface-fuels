@@ -155,7 +155,10 @@ def train_v3(grids: Dict, sites: list, out_path: str = MODEL_V3_PATH, quantiles=
     # min_i ||z - c_i|| / r_i, threshold 1.0. Foreign biomes sit far beyond every radius.
     centroids = np.stack([Zaef[sid == i].mean(0) for i in range(len(sites))])   # (n_sites, 64)
     radii = np.array([np.percentile(np.sqrt(((Zaef[sid == i] - centroids[i]) ** 2).sum(1)), 99)
-                      for i in range(len(sites))]) + 1e-6                        # 99th-pct biome spread
+                      for i in range(len(sites))])                              # 99th-pct biome spread
+    # FLOOR the radius at the median biome spread: a very homogeneous biome (e.g. closed-canopy
+    # rainforest) has near-constant AEF -> radius~0, which would make it (and look-alikes) self-OOD.
+    radii = np.maximum(radii, float(np.median(radii))) + 1e-6
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     joblib.dump({"models": models, "quantiles": quantiles, "delta": float(delta),
                  "tile_std": False, "use_lband": True, "use_chm": True, "target": "occ_thin",
