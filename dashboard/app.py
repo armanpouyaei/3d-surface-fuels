@@ -312,7 +312,7 @@ def rgb_vs_structure(rgb, pred, vmax, ff=None, ff_label="FastFuels surface", uni
     rgb_img = _resample_rgb(rgb, ny, nx) if rgb is not None else np.full((ny, nx, 3), 230, np.uint8)
     # (title, kind, z, vmax, hover-unit) — heatmaps carry real z values
     panels = [("🛰️ Esri satellite (real)", "img", rgb_img, None, None),
-              (f"Our structure ({unit})", "heat", np.flipud(pred), vmax, unit)]
+              (f"Our surface load ({unit})", "heat", np.flipud(pred), vmax, unit)]
     if ff is not None:
         ffmax = float(np.percentile(ff[ff > 0], 98)) if (ff > 0).any() else 1.0
         panels.append((f"{ff_label} (kg/m²)", "heat", ff, ffmax, "kg/m²"))   # ff already north-up
@@ -743,23 +743,28 @@ elif source.startswith("🌍"):
         st.info("Zoom in, click a grid tile to select it, then press **Generate ▶**.")
         st.stop()
 
-    pred, ood = out["pred10"], out["ood"]
-    is_occ = out.get("target") == "occ_thin"          # v3 predicts vertical occupancy (0–1), not load
-    unit = "occupancy 0–1" if is_occ else "kg/m²"
+    ood = out["ood"]
+    is_occ = out.get("target") == "occ_thin"          # v3 predicts vertical occupancy; show it as load
+    # convert occupancy -> surface load (kg/m²) at the display layer (see portable.OCC_TO_LOAD_KG_M2),
+    # so the whole tab reads in kg/m² and is directly comparable to the FastFuels/baseline panel.
+    K = portable.OCC_TO_LOAD_KG_M2 if is_occ else 1.0
+    pred = out["pred10"] * K
+    lo, hi = out["lower"] * K, out["upper"] * K
+    unit = "kg/m²"
     thr, frac_ood = float(out["ood_thresh"]), float(out["frac_ood"])
     if frac_ood > 0.5:
         st.error(f"⚠️ {frac_ood*100:.0f}% of this AOI is **out-of-distribution** — unlike the model's training "
-                 "data (13 ecosystems across 4 continents: US biomes + Europe + tropical Puerto Rico + boreal "
-                 "Latvia + arid Mojave). OOD reflects novelty in **ecosystem AND AlphaEarth year** (embeddings "
-                 "drift yearly). Treat as exploratory extrapolation, *not* a validated product — the flag is "
-                 "**conservative by design** (it warns rather than silently misleads).")
+                 "data (15 ecosystems across 4 continents: US biomes + Europe + Amazon & Borneo rainforest + "
+                 "boreal Latvia + arid Mojave). OOD reflects novelty in **ecosystem AND AlphaEarth year** "
+                 "(embeddings drift yearly). Treat as exploratory extrapolation, *not* a validated product — the "
+                 "flag is **conservative by design** (it warns rather than silently misleads).")
     elif frac_ood > 0.15:
         st.warning(f"{frac_ood*100:.0f}% of cells are out-of-distribution (ecosystem and/or AEF-year novelty) — interpret with care.")
     else:
         st.success("In-distribution: this AOI + year resembles the training data — most confidence here.")
     st.caption(f"{'⚡ cached' if out.get('cached') else '🛰️ freshly generated'} · model **{out.get('version','v1')}** · "
                f"AlphaEarth {out['year']} · {'with' if out.get('has_s1') else 'no'} Sentinel-1 · "
-               f"EPSG:{int(out['epsg'])} · *predicted* surface structure — no local truth here, read uncertainty + OOD.")
+               f"EPSG:{int(out['epsg'])} · *predicted* surface load — no local truth here, read uncertainty + OOD.")
 
     # satellite RGB · our structure · FastFuels surface (the "are we adding value?" check)
     ny0, nx0 = pred.shape
@@ -789,17 +794,19 @@ elif source.startswith("🌍"):
             ref = ("a **global categorical baseline** (ESA WorldCover 10 m → fuel crosswalk; the worldwide "
                    "analog to FastFuels' LANDFIRE method, since FastFuels itself is US-only) — *coarse, "
                    "land-cover-class-uniform*")
-        st.caption(f"Satellite · **our structure (CV {ours_cv:.2f})** · **{ff_label} (CV {ff_cv:.2f})**. "
+        same = is_occ  # ours is an occupancy-derived load estimate; reference is a categorical SB40 load
+        st.caption(f"Satellite · **our surface load (CV {ours_cv:.2f})** · **{ff_label} (CV {ff_cv:.2f})**, both kg/m². "
                    f"The reference is {ref}. Where ours shows fine sub-30 m detail the satellite supports and the "
-                   "blocky reference can't, we're adding value. (Different quantities — our near-ground structure "
-                   "vs reference total load — so compare the *spatial pattern*, not absolute values.)")
+                   "blocky reference can't, we're adding value. "
+                   + ("(Our load = predicted vertical occupancy × a fine-fuel bulk-density factor — a first-order "
+                      "absolute calibration; trust the *spatial pattern* over the absolute magnitude.)" if same else ""))
 
     st.plotly_chart(voxel_figure(portable.display_grid(pred, out["res"]), threshold, opacity,
-                                 f"Predicted 3D structure @ ({lat:.3f}, {lon:.3f})"), use_container_width=True)
+                                 f"Predicted 3D surface fuel @ ({lat:.3f}, {lon:.3f})"), use_container_width=True)
 
-    width = out["upper"] - out["lower"]
+    width = hi - lo
     st.plotly_chart(synced_heatmaps([
-        {"title": f"Predicted structure ({unit})", "z": pred, "cmin": 0,
+        {"title": f"Predicted surface load ({unit})", "z": pred, "cmin": 0,
          "cmax": float(np.percentile(pred, 98) + 1e-6), "colorscale": COLORSCALE, "cbar": True, "cbar_title": unit},
         {"title": "Uncertainty (90% interval width)", "z": width, "cmin": 0,
          "cmax": float(np.percentile(width, 98) + 1e-6), "colorscale": "Purples", "cbar": True, "cbar_title": unit},
@@ -810,7 +817,7 @@ elif source.startswith("🌍"):
                "model was trained on. Zoom any panel — all move together.")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"Mean structure ({unit})", f"{pred.mean():.2f}")
+    c1.metric(f"Mean surface load ({unit})", f"{pred.mean():.2f}")
     c2.metric("Heterogeneity (CV)", f"{pred.std()/(pred.mean()+1e-9):.2f}")
     c3.metric(f"Mean uncertainty ({unit})", f"{width.mean():.2f}")
     c4.metric("% out-of-distribution", f"{frac_ood*100:.0f}%")
@@ -821,7 +828,8 @@ elif source.startswith("🌍"):
         st.caption(f"1 m export disabled for this AOI (~{est['export_1m_mb']:.0f} MB > cap).")
     elif st.button(f"Build 1 m³ NetCDF (Option C) · ~{est['export_1m_mb']:.0f} MB"):
         p = os.path.join(PROC, "generated_aoi_1m.nc")
-        portable.to_netcdf_1m(out, p)
+        out_load = {**out, "pred10": pred, "lower": lo, "upper": hi}   # export in kg/m² (load)
+        portable.to_netcdf_1m(out_load, p)
         with open(p, "rb") as f:
             st.download_button("⬇ download generated_aoi_1m.nc", f, file_name="generated_aoi_1m.nc")
 

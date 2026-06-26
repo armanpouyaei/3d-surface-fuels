@@ -36,6 +36,13 @@ AEF_BANDS = [f"aef{i:02d}" for i in range(64)]
 FEATS = AEF_BANDS + ["s1_vhvv", "s1_rvi"]
 VPROFILE = np.array([0.45, 0.25, 0.13, 0.07, 0.05, 0.03, 0.015, 0.005], np.float32)  # near-ground shape
 
+# First-order occupancy -> surface fuel LOAD (kg/m²): understory stratum depth (0.15-4 m = 3.85 m)
+# × an effective fine-fuel bulk density (~0.26 kg/m³, within the literature surface-fuelbed range).
+# So a fully-occupied understory column ≈ 1 kg/m² and a typical occupancy (~0.6) ≈ 0.6 kg/m², which
+# lands in the Scott&Burgan SB40 surface-load range. A transparent display-layer calibration so the
+# v3 occupancy product reads in kg/m² (comparable to FastFuels); absolute scaling pending destructive truth.
+OCC_TO_LOAD_KG_M2 = 3.85 * 0.26   # ≈ 1.0 kg/m² per unit vertical occupancy
+
 # ── memory guardrails (so a picked AOI can never OOM) ──────────────────────────
 # Inference runs at 10 m, so cells scale as (size/10)². The cap below bounds every
 # transient: at 2000 m → 200×200 = 40k 10-m cells (feature matrix ≈ 11 MB, AEF ≈ 10 MB).
