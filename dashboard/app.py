@@ -303,36 +303,33 @@ def synced_heatmaps(panels):
     return fig
 
 
-def rgb_vs_structure(rgb, pred, vmax, ff=None, ff_label="FastFuels surface"):
-    """Equal-size panels: real Esri satellite · our predicted structure · (optional)
-    FastFuels surface load. All arrays are drawn as go.Image on the SAME (ny,nx) grid so
-    every panel is identical size. ``pred`` is row 0 = south (flip to north-up); ``rgb``
-    and ``ff`` (LANDFIRE exportImage) are already north-up."""
-    import matplotlib
-    try:
-        cmap = matplotlib.colormaps["YlOrRd"]
-    except Exception:
-        import matplotlib.cm as _cm
-        cmap = _cm.get_cmap("YlOrRd")
+def rgb_vs_structure(rgb, pred, vmax, ff=None, ff_label="FastFuels surface", unit="kg/m²"):
+    """Equal-size panels: real Esri satellite (RGB go.Image) · our predicted structure ·
+    (optional) reference surface load. The two data panels are go.Heatmap so hover shows the
+    REAL value (occupancy / load), not RGB. ``pred`` is row 0 = south (flip to north-up);
+    ``rgb`` and ``ff`` (LANDFIRE exportImage) are already north-up. All panels square + zoom-synced."""
     ny, nx = pred.shape
-
-    def colorize(arr, vmx, flip):
-        a = np.flipud(arr) if flip else arr
-        return (cmap(np.clip(a / (vmx + 1e-9), 0, 1))[:, :, :3] * 255).astype(np.uint8)
-
     rgb_img = _resample_rgb(rgb, ny, nx) if rgb is not None else np.full((ny, nx, 3), 230, np.uint8)
-    panels = [("🛰️ Esri satellite (real)", rgb_img),
-              (f"Our structure · 0–{vmax:.2f} kg/m²", colorize(pred, vmax, True))]
+    # (title, kind, z, vmax, hover-unit) — heatmaps carry real z values
+    panels = [("🛰️ Esri satellite (real)", "img", rgb_img, None, None),
+              (f"Our structure ({unit})", "heat", np.flipud(pred), vmax, unit)]
     if ff is not None:
         ffmax = float(np.percentile(ff[ff > 0], 98)) if (ff > 0).any() else 1.0
-        panels.append((f"{ff_label} · 0–{ffmax:.1f} kg/m²", colorize(ff, ffmax, False)))
+        panels.append((f"{ff_label} (kg/m²)", "heat", ff, ffmax, "kg/m²"))   # ff already north-up
     fig = make_subplots(rows=1, cols=len(panels), horizontal_spacing=0.03,
                         subplot_titles=[p[0] for p in panels])
-    for i, (_, img) in enumerate(panels, start=1):
-        fig.add_trace(go.Image(z=img), row=1, col=i)
-    # synchronized zoom/pan: all panels share one x/y range (same (ny,nx) grid) — zoom one, all move
-    fig.update_xaxes(showticklabels=False, matches="x")
-    fig.update_yaxes(showticklabels=False, matches="y")
+    for i, (_, kind, z, vmx, u) in enumerate(panels, start=1):
+        if kind == "img":
+            fig.add_trace(go.Image(z=z), row=1, col=i)
+        else:                                  # real values on hover (z = occupancy / load)
+            fig.add_trace(go.Heatmap(z=z, colorscale=COLORSCALE, zmin=0, zmax=vmx, showscale=False,
+                                     hovertemplate=f"%{{z:.2f}} {u}<extra></extra>"), row=1, col=i)
+    # square panels + synchronized zoom: matches on x, scaleanchor on y->x (never both on one axis)
+    fig.update_xaxes(showticklabels=False, matches="x", constrain="domain")
+    for i in range(1, len(panels) + 1):
+        xa = "x" if i == 1 else f"x{i}"
+        fig.update_yaxes(showticklabels=False, autorange="reversed", scaleanchor=xa,
+                         scaleratio=1, constrain="domain", row=1, col=i)
     fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0), dragmode="zoom")
     return fig
 
@@ -777,7 +774,7 @@ elif source.startswith("🌍"):
         else:                                             # global fallback baseline
             ff = load_global_surface(*args)
             ff_label, ff_src = "Global baseline (WorldCover→fuel)", "worldcover"
-    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6), ff, ff_label),
+    st.plotly_chart(rgb_vs_structure(rgb, pred, float(np.percentile(pred, 98) + 1e-6), ff, ff_label, unit),
                     use_container_width=True)
     ours_cv = float(pred.std() / (pred.mean() + 1e-9))
     if ff is None:
