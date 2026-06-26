@@ -310,27 +310,35 @@ def rgb_vs_structure(rgb, pred, vmax, ff=None, ff_label="FastFuels surface", uni
     ``rgb`` and ``ff`` (LANDFIRE exportImage) are already north-up. All panels square + zoom-synced."""
     ny, nx = pred.shape
     rgb_img = _resample_rgb(rgb, ny, nx) if rgb is not None else np.full((ny, nx, 3), 230, np.uint8)
-    # (title, kind, z, vmax, hover-unit) — heatmaps carry real z values
-    panels = [("🛰️ Esri satellite (real)", "img", rgb_img, None, None),
-              (f"Our surface load ({unit})", "heat", np.flipud(pred), vmax, unit)]
+    # the two data panels (ours, reference) SHARE one colorscale so colors are directly comparable.
+    shared_max = vmax
+    if ff is not None and (ff > 0).any():
+        shared_max = max(shared_max, float(np.percentile(ff[ff > 0], 98)))
+    shared_max = float(shared_max + 1e-6)
+    # (title, kind, z, hover-unit) — heatmaps carry real z values
+    panels = [("🛰️ Esri satellite (real)", "img", rgb_img, None),
+              (f"Our surface load ({unit})", "heat", np.flipud(pred), unit)]
     if ff is not None:
-        ffmax = float(np.percentile(ff[ff > 0], 98)) if (ff > 0).any() else 1.0
-        panels.append((f"{ff_label} (kg/m²)", "heat", ff, ffmax, "kg/m²"))   # ff already north-up
+        panels.append((f"{ff_label} (kg/m²)", "heat", ff, "kg/m²"))   # ff already north-up
     fig = make_subplots(rows=1, cols=len(panels), horizontal_spacing=0.03,
                         subplot_titles=[p[0] for p in panels])
-    for i, (_, kind, z, vmx, u) in enumerate(panels, start=1):
+    heat_cols = [i for i, p in enumerate(panels, start=1) if p[1] == "heat"]
+    for i, (_, kind, z, u) in enumerate(panels, start=1):
         if kind == "img":
             fig.add_trace(go.Image(z=z), row=1, col=i)
-        else:                                  # real values on hover (z = occupancy / load)
-            fig.add_trace(go.Heatmap(z=z, colorscale=COLORSCALE, zmin=0, zmax=vmx, showscale=False,
-                                     hovertemplate=f"%{{z:.2f}} {u}<extra></extra>"), row=1, col=i)
+        else:                                  # real values on hover; ONE shared colorbar (kg/m²)
+            last = i == heat_cols[-1]
+            fig.add_trace(go.Heatmap(
+                z=z, colorscale=COLORSCALE, zmin=0, zmax=shared_max, showscale=last,
+                colorbar=dict(title="kg/m²", x=1.005, thickness=12, len=0.85, y=0.46) if last else None,
+                hovertemplate=f"%{{z:.2f}} {u}<extra></extra>"), row=1, col=i)
     # square panels + synchronized zoom: matches on x, scaleanchor on y->x (never both on one axis)
     fig.update_xaxes(showticklabels=False, matches="x", constrain="domain")
     for i in range(1, len(panels) + 1):
         xa = "x" if i == 1 else f"x{i}"
         fig.update_yaxes(showticklabels=False, autorange="reversed", scaleanchor=xa,
                          scaleratio=1, constrain="domain", row=1, col=i)
-    fig.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0), dragmode="zoom")
+    fig.update_layout(height=400, margin=dict(l=0, r=40, t=30, b=0), dragmode="zoom")
     return fig
 
 
