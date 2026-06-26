@@ -36,12 +36,13 @@ AEF_BANDS = [f"aef{i:02d}" for i in range(64)]
 FEATS = AEF_BANDS + ["s1_vhvv", "s1_rvi"]
 VPROFILE = np.array([0.45, 0.25, 0.13, 0.07, 0.05, 0.03, 0.015, 0.005], np.float32)  # near-ground shape
 
-# First-order occupancy -> surface fuel LOAD (kg/m²): understory stratum depth (0.15-4 m = 3.85 m)
-# × an effective fine-fuel bulk density (~0.26 kg/m³, within the literature surface-fuelbed range).
-# So a fully-occupied understory column ≈ 1 kg/m² and a typical occupancy (~0.6) ≈ 0.6 kg/m², which
-# lands in the Scott&Burgan SB40 surface-load range. A transparent display-layer calibration so the
-# v3 occupancy product reads in kg/m² (comparable to FastFuels); absolute scaling pending destructive truth.
-OCC_TO_LOAD_KG_M2 = 3.85 * 0.26   # ≈ 1.0 kg/m² per unit vertical occupancy
+# Occupancy -> surface fuel LOAD (kg/m²), FIELD-CALIBRATED against RxCADRE destructive clip-plot
+# total surface loads at Eglin (RDS-2014-0028 loads + RDS-2014-0030 coords, 9 burn blocks spanning
+# grass 0.21 → forest 1.12 kg/m²): least-squares slope through origin = 1.33, R² = 0.93
+# (scripts/calibrate_load_field.py). Replaces the earlier literature anchor (≈1.0). Honest scope: a
+# single-ecosystem (Eglin longleaf/sandhill) field anchor — strong R² across a wide load range, but
+# multi-site destructive truth would refine per-biome transfer.
+OCC_TO_LOAD_KG_M2 = 1.33   # kg/m² per unit vertical occupancy (RxCADRE-field-calibrated, R² 0.93)
 
 # ── memory guardrails (so a picked AOI can never OOM) ──────────────────────────
 # Inference runs at 10 m, so cells scale as (size/10)². The cap below bounds every

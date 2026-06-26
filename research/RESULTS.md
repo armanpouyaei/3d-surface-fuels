@@ -426,6 +426,28 @@ Sahel, hyper-arid, dry-cropland, S-hemisphere temperate forest — are correctly
 Predicted occupancy tracks vegetation sensibly (desert/grass low, closed forest high). The path to full
 global coverage is more tiles in the still-flagged regimes — the design extends tile-by-tile.
 
+## 2j. Field-calibrated absolute load — RxCADRE destructive truth (`scripts/calibrate_load_field.py`)
+
+The v3 occupancy product needed an absolute kg/m² anchor. A head-to-head vs FastFuels
+(`scripts/compare_load_vs_fastfuels.py`) showed ours ran **systematically ~0.73× FastFuels** (worst in
+heavy-fuel forests: WREF 0.47×, HARV 0.51×; reversed in desert SRER 1.37×) — because the placeholder
+occupancy→load factor was a conservative literature guess and occupancy saturates while SB40 forest
+models are heavier. NEON herbaceous clips were the **wrong** truth to fix it (herb sits <0.15 m, off our
+0.15–4 m stratum → proxy-vs-herb R² 0.02).
+
+The right truth is **RxCADRE** destructive clip-plot **total** surface loads at Eglin (USFS RDS-2014-0028
+loads + RDS-2014-0030 coords, UTM 16N, co-located with airborne LiDAR). Pairing each 2012 burn block's
+mean pre-fire total load with our model's mean occupancy there (9 blocks, grass 0.21 → forest 1.12 kg/m²):
+
+> **occupancy → total surface load: slope = 1.33 kg/m² per unit occupancy, R² = 0.93** (origin fit).
+
+So occupancy predicts **field total surface load** strongly and linearly across a 5× load range. We adopt
+**`OCC_TO_LOAD_KG_M2 = 1.33`** (was ≈1.0) — a **validation-first, destructive-truth** anchor, not a guess.
+It also reconciles the FastFuels gap: ×1.33 lifts ours from 0.73× to ≈0.97× FastFuels, i.e. our absolute
+magnitudes now agree with the operational product **while** our map keeps the within-class heterogeneity
+FastFuels lacks (§2g). Honest scope: single-ecosystem (Eglin longleaf/sandhill) anchor — strong R² over a
+wide range, but multi-site destructive truth would refine per-biome transfer.
+
 ## 3. Supporting real-data results
 
 - **Stage-1 AlphaEarth dominance** (`build_global30.py --site osbs`): AEF-only
