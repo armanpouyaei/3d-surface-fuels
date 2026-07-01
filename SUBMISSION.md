@@ -32,7 +32,8 @@ calibrated to **destructive ground truth**, with honest uncertainty.
 | # | Deliverable | Where |
 |---|---|---|
 | Data product | 1 m³ voxel NetCDF, FastFuels "Option C" (OSBS: measured, uniform-baseline, generalized) | `data/processed/osbs_*_1m.nc` via `scripts/build_deliverable_osbs.py` |
-| Fuel properties | bulk_density (kg/m³), fuel_load (kg/m²), percent_cover (%), SAVR (1/m), live_fraction, **dead + live fuel moisture (%)** | in the NetCDF |
+| Fuel properties | bulk_density (kg/m³), fuel_load (kg/m²), percent_cover (%), SAVR (1/m), live_fraction, **dead + live fuel moisture (%)**, heat of combustion (kJ/kg) | in the NetCDF |
+| P3 landscape metrics | avg patch size (m), heterogeneity CV below 2 m | NetCDF attrs (`p3_*`) |
 | Geospatial locational data | AOI boundary polygon, WGS84 + native CRS | `data/processed/osbs_boundary.geojson` |
 | Property maps + 3D viz | property-map figure + interactive 3D | `figures/deliverable_osbs.png`, dashboard |
 | **Validation documentation** | methodology, truth data, blocked-CV, metrics, field calibration, limitations | [research/RESULTS.md](research/RESULTS.md), [research/VALIDATION.md](research/VALIDATION.md) |
@@ -118,8 +119,9 @@ Borneo moved the tropics from OOD to in-distribution).
 - **Within-biome fine structure in a *brand-new* biome** is partially solved (forests) — the genuine
   sensing limit (optical/C-band don't see under closed canopy); L-band + canopy height help, GEDI is sparse.
 - **Fuel moisture (P2)** is populated but coarse: dead FM is ERA5-driven (Simard EMC; ERA5 ~9–31 km,
-  so near-uniform at AOI scale), live FM is a Sentinel-2 NDVI-scaled proxy (uncalibrated LFMC). Some P3
-  properties (patch size, heat of combustion, species) are not yet populated (roadmap below).
+  so near-uniform at AOI scale), live FM is a Sentinel-2 NDVI-scaled proxy (uncalibrated LFMC). Most P3
+  metrics are now included (avg patch size, <2 m heterogeneity, heat of combustion); species mix is out
+  of scope for Phase 1.
 - The OOD flag is conservative by design — it warns rather than silently extrapolates.
 
 ## 5. Reproducibility

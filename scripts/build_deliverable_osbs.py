@@ -51,15 +51,38 @@ REP_MODEL = "GR3"
 SENTINEL = 1.23456  # challenge no-data sentinel for non-mass properties
 
 
+HEAT_OF_COMBUSTION_KJ_KG = 18608.0   # standard dead/live fine-fuel heat content (8000 BTU/lb, Rothermel/FBFM)
+
+
 def fuel_props(bd, model=REP_MODEL):
-    """Per-voxel live-fraction + SAVR arrays from the SB40 lookup: the fuel-model value in
-    occupied voxels, the no-data sentinel elsewhere. SAVR/live-dead are class properties (the
-    same lookup FastFuels uses), not LiDAR-measured — bulk density/depth/load ARE measured."""
+    """Per-voxel live-fraction + SAVR + heat-of-combustion arrays from the SB40/physical lookup:
+    the value in occupied voxels, the no-data sentinel elsewhere. These are class/physical
+    properties (the same source FastFuels uses); bulk density/depth/load ARE LiDAR-measured."""
     occ = bd > 0
     p = SB40_PROPS[model]
     lf = np.where(occ, np.float32(p["live_frac"]), np.float32(SENTINEL)).astype(np.float32)
     sv = np.where(occ, np.float32(p["savr_1perm"]), np.float32(SENTINEL)).astype(np.float32)
-    return {"live_fraction": lf, "savr": sv}
+    hc = np.where(occ, np.float32(HEAT_OF_COMBUSTION_KJ_KG), np.float32(SENTINEL)).astype(np.float32)
+    return {"live_fraction": lf, "savr": sv, "heat_of_combustion": hc}
+
+
+def p3_metrics(grid):
+    """P3 landscape metrics: average fuel-patch size (m) via connected components on the 2D
+    fuel mask, and heterogeneity CV of bulk density below 2 m (the challenge's <2 m heterogeneity)."""
+    from scipy import ndimage
+    mask = grid.fuel_load() > 0
+    lab, n = ndimage.label(mask)                      # 4-connectivity fuel patches
+    if n:
+        areas = np.bincount(lab.ravel())[1:] * (grid.dx * grid.dy)   # m² per patch
+        patch_area = float(areas.mean()); patch_diam = float(2 * np.sqrt(patch_area / np.pi))
+    else:
+        patch_area = patch_diam = 0.0
+    zc = grid.heights()
+    zlt2 = grid.bulk_density[zc < 2.0]                # voxels below 2 m
+    occ = zlt2 > 0
+    cv2 = float(zlt2[occ].std() / (zlt2[occ].mean() + 1e-9)) if occ.any() else 0.0
+    return {"avg_patch_size_m": round(patch_diam, 2), "avg_patch_area_m2": round(patch_area, 2),
+            "heterogeneity_cv_below_2m": round(cv2, 3)}
 
 
 def clean_grid(bd, x0, y0, attrs, model=REP_MODEL):
@@ -73,11 +96,11 @@ def clean_grid(bd, x0, y0, attrs, model=REP_MODEL):
                                 "live_fraction_source": f"SB40 {model} lookup"})
 
 
-PROP_NOTE = ("bulk_density, fuelbed depth and load are MEASURED from LiDAR; SAVR and live/dead "
-             "fraction are per-voxel from the Scott & Burgan SB40 fuel-model lookup (the same source "
-             f"FastFuels uses), model {REP_MODEL}; dead fuel moisture = Simard EMC from ERA5 weather, "
-             "live fuel moisture = Sentinel-2 NDVI-scaled proxy (coarse; see moisture.py). Empty "
-             f"voxels carry the sentinel {SENTINEL} for non-mass properties.")
+PROP_NOTE = ("bulk_density, fuelbed depth and load are MEASURED from LiDAR; SAVR, live/dead fraction "
+             f"and heat of combustion are per-voxel from the SB40/physical lookup (model {REP_MODEL}); "
+             "dead fuel moisture = Simard EMC from ERA5, live fuel moisture = Sentinel-2 NDVI proxy "
+             "(coarse); P3 avg-patch-size + <2 m heterogeneity in the attrs. Empty voxels carry the "
+             f"sentinel {SENTINEL} for non-mass properties.")
 
 
 def attach_moisture(g, dead, livefm):
@@ -152,6 +175,11 @@ def main():
           f"live FM (S2 NDVI proxy) = {'n/a' if livefm is None else str(round(float(np.nanmean(livefm)))) + '% mean'}")
     for g in (measured, uniform, generalized):
         attach_moisture(g, dead, livefm)
+        g.attrs.update({f"p3_{k}": v for k, v in p3_metrics(g).items()})  # P3 landscape metrics
+    mm = p3_metrics(measured)
+    print(f"  P3 metrics (measured): avg patch size {mm['avg_patch_size_m']} m "
+          f"({mm['avg_patch_area_m2']} m²) · heterogeneity CV below 2 m {mm['heterogeneity_cv_below_2m']} · "
+          f"heat of combustion {HEAT_OF_COMBUSTION_KJ_KG:.0f} kJ/kg")
 
     # write NetCDFs
     os.makedirs(PROC, exist_ok=True)

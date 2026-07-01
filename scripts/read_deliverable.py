@@ -69,6 +69,9 @@ def main():
     print(f"  mean load {load.mean():.3f} kg/m²  · load CV {load.std()/(load.mean()+1e-9):.2f} "
           f"(heterogeneity; 0 = uniform/FastFuels-style)")
     print(f"  fuelbed depth {g.fuelbed_depth().mean():.2f} m  · column occupancy {g.occupancy().mean()*100:.0f}%")
+    p3 = {k: v for k, v in ds.attrs.items() if k.startswith("p3_")}
+    if p3:
+        print("  P3 landscape metrics: " + " · ".join(f"{k[3:]} {v}" for k, v in p3.items()))
 
     # ---- boundary ----
     bpath = args.boundary or (os.path.splitext(args.netcdf)[0] + "_boundary.geojson")
