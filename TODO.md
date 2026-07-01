@@ -12,7 +12,7 @@ https://centralfloridatechgrove.org/surface-fuels-prize-challenge/ (Phase-1 dead
 | P1 cell bulk density (kg/m³) | ✅ |
 | P1 **percent cover (%)** exported | ⚠️ computed, not exported → **T18** |
 | P2 SAVR · live/dead (%) | ✅ SB40 lookup |
-| P2 **dead + live fuel moisture (%)** | ❌ sentinel → **T21 (ERA5/CDS)** |
+| P2 **dead + live fuel moisture (%)** | ✅ dead=ERA5 Simard EMC · live=S2 NDVI proxy (`moisture.py`) |
 | P3 patch size · heat of combustion · <2 m heterogeneity · species | ⚠️/❌ → **T22** |
 | **Boundary polygon GeoJSON** (+ projection) | ❌ → **T18** |
 | Fuel property maps + 3D viz | ✅ dashboard + figures |

@@ -74,9 +74,20 @@ def clean_grid(bd, x0, y0, attrs, model=REP_MODEL):
 
 
 PROP_NOTE = ("bulk_density, fuelbed depth and load are MEASURED from LiDAR; SAVR and live/dead "
-             "fraction are provided per-voxel from the Scott & Burgan SB40 fuel-model lookup (the "
-             f"same source FastFuels uses), model {REP_MODEL}; fuel moisture stays the challenge "
-             f"sentinel {SENTINEL}. Empty voxels carry the sentinel for non-mass properties.")
+             "fraction are per-voxel from the Scott & Burgan SB40 fuel-model lookup (the same source "
+             f"FastFuels uses), model {REP_MODEL}; dead fuel moisture = Simard EMC from ERA5 weather, "
+             "live fuel moisture = Sentinel-2 NDVI-scaled proxy (coarse; see moisture.py). Empty "
+             f"voxels carry the sentinel {SENTINEL} for non-mass properties.")
+
+
+def attach_moisture(g, dead, livefm):
+    """Add dead + live fuel moisture (%) as 2D properties: the value where the column has fuel,
+    the no-data sentinel elsewhere. dead is a scalar (ERA5, coarse); livefm is a 2D array."""
+    occ2d = g.fuel_load() > 0
+    if dead is not None:
+        g.extra["dead_fuel_moisture"] = np.where(occ2d, np.float32(dead), np.float32(SENTINEL)).astype(np.float32)
+    if livefm is not None and livefm.shape == occ2d.shape:
+        g.extra["live_fuel_moisture"] = np.where(occ2d, livefm.astype(np.float32), np.float32(SENTINEL)).astype(np.float32)
 
 
 def main():
@@ -130,6 +141,18 @@ def main():
         "vertical_note": "vertical profile borrowed from the measured mean (spaceborne resolves load, not vertical shape)",
         "properties_note": PROP_NOTE})
 
+    # P2 fuel moisture: dead = ERA5 Simard EMC (scalar, coarse); live = Sentinel-2 NDVI proxy (2D)
+    from surface_fuels import moisture as MO
+    from pyproj import Transformer
+    lon_c, lat_c = Transformer.from_crs(TGT_EPSG, 4326, always_xy=True).transform(cx, cy)
+    print("Fetching ERA5 (dead FM) + Sentinel-2 NDVI (live FM proxy)...")
+    dead = MO.dead_fuel_moisture(lat_c, lon_c, 2018)
+    livefm = MO.live_fuel_moisture_grid(measured)
+    print(f"  dead FM (ERA5 EMC) = {'n/a' if dead is None else round(dead, 1)}% · "
+          f"live FM (S2 NDVI proxy) = {'n/a' if livefm is None else str(round(float(np.nanmean(livefm)))) + '% mean'}")
+    for g in (measured, uniform, generalized):
+        attach_moisture(g, dead, livefm)
+
     # write NetCDFs
     os.makedirs(PROC, exist_ok=True)
     for name, g in [("osbs_measured_1m.nc", measured), ("osbs_uniform_1m.nc", uniform),
@@ -153,7 +176,7 @@ def main():
           f"| pattern corr vs measured r={r_pat:+.2f}")
     p = SB40_PROPS[REP_MODEL]
     print(f"  required props now present: SAVR {p['savr_1perm']:.0f} 1/m + live fraction {p['live_frac']:.2f} "
-          f"per occupied voxel (SB40 {REP_MODEL} lookup); fuel moisture = sentinel {SENTINEL}.")
+          f"per occupied voxel (SB40 {REP_MODEL} lookup); dead+live fuel moisture from ERA5/Sentinel-2.")
 
     # ── property-maps figure ────────────────────────────────────────────────────
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
