@@ -36,3 +36,5 @@ torch                  # CNN head-to-head (deconto_headtohead.py). On Apple Sili
 # claymodel            # Stage-2 UNet downscaler (Clay/AlphaEarth embeddings)
 # fastfuels-sdk        # FastFuels v2 API client (head-to-head + ingestion)
 joblib  # portable model persistence
+pyogrio  # read RxCADRE clip-plot .gdb for field calibration (calibrate_load_field.py)
+cdsapi   # ERA5 fetch for fuel moisture (needs ~/.cdsapirc key; live/dead moisture props)
