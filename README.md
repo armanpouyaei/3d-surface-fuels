@@ -37,6 +37,33 @@ python scripts/build_downscale_eglin.py   # real 30m→1m downscale over Eglin
 streamlit run dashboard/app.py            # launch the 3D dashboard
 ```
 
+## Deliverable format & ingestion tool
+
+Each deliverable is a **FastFuels-compatible Option-C NetCDF** of **1 m³ voxels** plus a sibling
+**AOI-boundary GeoJSON** (WGS84 + native CRS — the challenge's required geospatial locational data).
+The NetCDF carries, per the challenge's fuel-property list:
+
+| variable | dims | units | tier |
+|---|---|---|---|
+| `bulk_density` | (z,y,x) | kg/m³ | **P1** cell bulk density |
+| `fuel_load` | (y,x) | kg/m² | **P1** fuel load |
+| `percent_cover` | (y,x) | % | **P1** percent cover |
+| `savr` | (z,y,x) | 1/m | **P2** surface-area-to-volume |
+| `live_fraction` | (z,y,x) | – | **P2** live vs. dead |
+
+Empty cells use the challenge sentinel `1.23456`. CRS/origin/resolution are in the file attributes.
+
+**One-command ingestion + visualization tool** (the required Python tool — needs only numpy/xarray/matplotlib):
+
+```bash
+python scripts/read_deliverable.py data/processed/osbs_measured_1m.nc
+```
+
+It prints a property summary + a validation smell-test (mean load, heterogeneity CV, fuelbed depth,
+occupancy), reads the AOI boundary, and writes `<name>_maps.png` (fuel-property maps) and
+`<name>_3d.png` (3D voxel view). Build the OSBS deliverable itself with
+`python scripts/build_deliverable_osbs.py`.
+
 ## Repository layout
 
 ```
