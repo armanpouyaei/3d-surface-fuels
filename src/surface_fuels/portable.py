@@ -600,10 +600,11 @@ def to_netcdf_1m(out: Dict, path: str, nz: int = 8) -> str:
     up = np.repeat(np.repeat(pred10, int(out["res"]), 0), int(out["res"]), 1)  # 10 m -> 1 m load
     prof = VPROFILE[:nz] / VPROFILE[:nz].sum()
     bd = (up[None, :, :] * prof[:, None, None]).astype(np.float32)
-    FuelVoxelGrid(bd, dz=1.0, dy=1.0, dx=1.0,
-                  georef=GeoRef(f"EPSG:{int(out['epsg'])}", float(out["x0"]), float(out["y0"]), 1.0),
-                  attrs={"scenario": "predicted_global_1m",
-                         "source": "portable Stage-1 (AlphaEarth+Sentinel-1) -> 10 m -> 1 m disaggregation",
-                         "note": "structure predicted from spaceborne; 1 m vertical/horizontal disaggregated"}
-                  ).to_netcdf(path)
+    grid = FuelVoxelGrid(bd, dz=1.0, dy=1.0, dx=1.0,
+                         georef=GeoRef(f"EPSG:{int(out['epsg'])}", float(out["x0"]), float(out["y0"]), 1.0),
+                         attrs={"scenario": "predicted_global_1m",
+                                "source": "portable Stage-1 (AlphaEarth+Sentinel-1+L-band+canopy) -> 10 m -> 1 m",
+                                "note": "structure predicted from spaceborne; 1 m vertical/horizontal disaggregated"})
+    grid.to_netcdf(path)
+    grid.write_boundary_geojson(os.path.splitext(path)[0] + "_boundary.geojson")  # required locational data
     return path

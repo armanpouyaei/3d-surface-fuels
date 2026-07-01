@@ -837,9 +837,15 @@ elif source.startswith("🌍"):
     elif st.button(f"Build 1 m³ NetCDF (Option C) · ~{est['export_1m_mb']:.0f} MB"):
         p = os.path.join(PROC, "generated_aoi_1m.nc")
         out_load = {**out, "pred10": pred, "lower": lo, "upper": hi}   # export in kg/m² (load)
-        portable.to_netcdf_1m(out_load, p)
+        portable.to_netcdf_1m(out_load, p)                            # also writes *_boundary.geojson
+        gj = os.path.splitext(p)[0] + "_boundary.geojson"
+        d1, d2 = st.columns(2)
         with open(p, "rb") as f:
-            st.download_button("⬇ download generated_aoi_1m.nc", f, file_name="generated_aoi_1m.nc")
+            d1.download_button("⬇ 1 m³ NetCDF (Option C)", f, file_name="generated_aoi_1m.nc")
+        with open(gj, "rb") as f:
+            d2.download_button("⬇ AOI boundary (GeoJSON)", f, file_name="generated_aoi_boundary.geojson")
+        st.caption("NetCDF carries bulk_density (3D) + fuel_load & percent_cover (2D); GeoJSON is the "
+                   "AOI footprint (WGS84 + native CRS).")
 
 # ===================== SYNTHETIC MODE =====================
 elif source.startswith("Synthetic"):

@@ -149,15 +149,26 @@ class FuelVoxelGrid:
         y = self.georef.y0 + (np.arange(self.ny) + 0.5) * self.dy
         x = self.georef.x0 + (np.arange(self.nx) + 0.5) * self.dx
 
+        occ = self.bulk_density > 0
         data_vars = {
             "bulk_density": (
                 ("z", "y", "x"),
                 self.bulk_density,
                 {"units": "kg m-3", "long_name": "fuel bulk density"},
-            )
+            ),
+            # P1 explicit named properties (2D), so judges don't have to derive them
+            "fuel_load": (
+                ("y", "x"), self.fuel_load(),
+                {"units": "kg m-2", "long_name": "fuel load (bulk density integrated over height)"},
+            ),
+            "percent_cover": (
+                ("y", "x"), (100.0 * occ.mean(axis=0)).astype(np.float32),
+                {"units": "percent", "long_name": "percent fuel cover (vertical occupancy of the fuel column)"},
+            ),
         }
         for name, arr in self.extra.items():
-            data_vars[name] = (("z", "y", "x"), arr)
+            dims = ("z", "y", "x") if np.ndim(arr) == 3 else ("y", "x")
+            data_vars[name] = (dims, arr)
 
         ds = xr.Dataset(
             data_vars=data_vars,
@@ -182,6 +193,36 @@ class FuelVoxelGrid:
     def to_netcdf(self, path: str) -> None:
         """Write a FastFuels-compatible (Option C) NetCDF file."""
         self.to_dataset().to_netcdf(path)
+
+    def boundary_geojson(self) -> Dict:
+        """AOI footprint as a GeoJSON FeatureCollection in lon/lat (EPSG:4326), with the
+        native CRS + metre-space corners recorded in properties (the challenge's required
+        'geospatial locational data' deliverable)."""
+        from pyproj import Transformer
+        g = self.georef
+        epsg = int(str(g.crs).split(":")[-1])
+        x1, y1 = g.x0 + self.nx * self.dx, g.y0 + self.ny * self.dy
+        corners_m = [(g.x0, g.y0), (x1, g.y0), (x1, y1), (g.x0, y1), (g.x0, g.y0)]
+        tr = Transformer.from_crs(epsg, 4326, always_xy=True)
+        ring = [list(tr.transform(x, y)) for x, y in corners_m]
+        return {
+            "type": "FeatureCollection",
+            "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}},
+            "features": [{
+                "type": "Feature",
+                "properties": {"name": self.attrs.get("title", "AOI"), "native_crs": f"EPSG:{epsg}",
+                               "resolution_m": g.resolution,
+                               "extent_m": {"x0": g.x0, "y0": g.y0, "x1": x1, "y1": y1}},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            }],
+        }
+
+    def write_boundary_geojson(self, path: str) -> str:
+        """Write boundary_geojson() to ``path`` (lon/lat WGS84)."""
+        import json
+        with open(path, "w") as f:
+            json.dump(self.boundary_geojson(), f, indent=2)
+        return path
 
     @classmethod
     def from_netcdf(cls, path: str) -> "FuelVoxelGrid":

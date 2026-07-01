@@ -136,6 +136,9 @@ def main():
                     ("osbs_generalized_1m.nc", generalized)]:
         g.to_netcdf(os.path.join(PROC, name))
         print(f"  wrote data/processed/{name}  {g.shape}")
+    # required 'geospatial locational data' deliverable: AOI boundary polygon (lon/lat + native CRS)
+    bpath = measured.write_boundary_geojson(os.path.join(PROC, "osbs_boundary.geojson"))
+    print(f"  wrote data/processed/{os.path.basename(bpath)} (AOI boundary, WGS84 + native CRS)")
 
     # ── validation / smell test ─────────────────────────────────────────────────
     ml, ul, gl = measured.fuel_load(), uniform.fuel_load(), generalized.fuel_load()
