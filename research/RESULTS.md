@@ -382,8 +382,10 @@ aren't a per-tile feature, but the GEDI-trained canopy-height raster is.)
   0.88 → **0.00**, Finland **0.00**. (Canadian boreal still flagged — different forest composition.)
 - **Arid: partial.** Mojave brought semi-arid Arabia to borderline (0.50); hyper-arid Sahara/Outback
   stay flagged (sand ≠ desert scrub).
-- **Tropical: limited.** Caribbean Puerto Rico does **not** generalize to equatorial rainforest —
-  Amazon/Congo/SE Asia stay OOD. An actual rainforest tile is needed (honest limit; the design supports it).
+- **Tropical: limited *at 13 sites*.** Caribbean Puerto Rico did **not** generalize to equatorial
+  rainforest — Amazon/Congo/SE Asia stayed OOD, showing an actual rainforest tile was needed.
+  **→ Superseded by §2i/§2j:** adding **Amazon (Ducke) + Borneo (Danum)** ALS tiles (now 15 training
+  sites) brought Amazon **100 % in-distribution** and Congo/Borneo to borderline (~40–60 %).
 
 **OOD method fix — per-biome radius.** Adding a very distinct trained biome (tropical PR) exposed a
 flaw: a **single global centroid** + global-percentile threshold mislabels the most distinct *trained*
