@@ -1,5 +1,30 @@
 # TODO — build plan
 
+## ✅ Deliverables audit vs official challenge page (2026-06-26)
+
+Checked our repo against the required deliverables on
+https://centralfloridatechgrove.org/surface-fuels-prize-challenge/ (Phase-1 deadline 2026-07-20):
+
+| deliverable | status |
+|---|---|
+| 1 m³ geo-referenced arrays / FastFuels-compatible NetCDF (sentinel 1.23456) | ✅ `build_deliverable_osbs.py` |
+| P1 fuel load (kg/m²) — field-calibrated | ✅ |
+| P1 cell bulk density (kg/m³) | ✅ |
+| P1 **percent cover (%)** exported | ⚠️ computed, not exported → **T18** |
+| P2 SAVR · live/dead (%) | ✅ SB40 lookup |
+| P2 **dead + live fuel moisture (%)** | ❌ sentinel → **T21 (ERA5/CDS)** |
+| P3 patch size · heat of combustion · <2 m heterogeneity · species | ⚠️/❌ → **T22** |
+| **Boundary polygon GeoJSON** (+ projection) | ❌ → **T18** |
+| Fuel property maps + 3D viz | ✅ dashboard + figures |
+| **Validation documentation** (top-weighted) | ✅ RESULTS.md/VALIDATION.md (strong) |
+| **Python ingestion/visualization tool** (standalone + README) | ⚠️ pieces exist → **T19** |
+| **Consolidated Phase-1 submission package/report** | ❌ → **T20** |
+
+Gaps → tasks: **T18** boundary GeoJSON + % cover · **T19** package the Python tool · **T20**
+assemble the submission package/report · **T21** fuel moisture via ERA5/CDS · **T22** cheap P3 props.
+Strong on the highest-weighted axes (validation, clarity, generality, low-cost data); remaining work
+is required *artifacts/packaging* + a few missing properties.
+
 ## 🎯 Prioritized roadmap to submission — deadline **2026-07-20** (~4 weeks)
 
 Goal: **win.** Judged on utility, generality, data cost, clarity, **validation
