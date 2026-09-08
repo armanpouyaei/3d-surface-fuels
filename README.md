@@ -1,7 +1,7 @@
 # 3D Surface Fuels — a measured alternative to FastFuels' modeled surface layer
 
-A submission-in-progress for the [3D Surface Fuels & Vegetation Modeling Prize Challenge](https://centralfloridatechgrove.org/surface-fuels-prize-challenge/)
-(Central Florida Tech Grove / NAWCTSD / SERDP-ESTCP). **Phase-1 deadline: 2026-07-20.**
+A work which never got submitted for the [3D Surface Fuels & Vegetation Modeling Prize Challenge](https://centralfloridatechgrove.org/surface-fuels-prize-challenge/)
+(Central Florida Tech Grove / NAWCTSD / SERDP-ESTCP). **Phase-1 deadline was 2026-07-20.**
 
 ## The one-sentence thesis
 
